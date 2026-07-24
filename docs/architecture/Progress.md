@@ -60,6 +60,9 @@ _Last updated:_ 2026-07-24
   WS-02 hasn't implemented the `/documents` endpoints yet, so a dev-only mock
   (`apps/frontend/src/mocks/mockDocumentsApi.ts`, gated by
   `VITE_ENABLE_API_MOCKS`) stands in for the contract in the interim.
+- Repo hygiene: removed stray build artifacts (`tsconfig.tsbuildinfo`,
+  `vite.config.ts.timestamp-*.mjs`) that were accidentally committed with the
+  Phase 1 frontend work, and added `.gitignore` rules so they don't recur.
 
 ## Blockers
 

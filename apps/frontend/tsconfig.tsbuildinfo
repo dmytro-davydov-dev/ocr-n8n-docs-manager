@@ -1,1 +1,0 @@
-{"root":["./src/ErrorBoundary.tsx","./src/api.ts","./src/main.tsx","./src/queryClient.ts","./src/router.tsx","./src/vite-env.d.ts","./src/features/documents/DocumentList.tsx","./src/features/documents/DocumentsPage.tsx","./src/features/documents/UploadDropzone.tsx","./src/mocks/mockDocumentsApi.ts"],"version":"5.9.3"}

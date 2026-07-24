@@ -12,3 +12,9 @@ celery_app = Celery(
 @celery_app.task(name="health.ping")
 def ping() -> str:
     return "pong"
+
+
+# Import task modules so they register with celery_app (ADR-008). Deferred
+# to the bottom of the module to avoid a circular import: app/tasks/*
+# imports celery_app itself to get the @celery_app.task decorator.
+from app.tasks import embeddings, extraction, file_validation, ocr  # noqa: E402,F401

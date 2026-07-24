@@ -15,6 +15,66 @@
         "title": "Body_upload_document_api_documents_post",
         "type": "object"
       },
+      "ChunkOut": {
+        "description": "RAG chunk + embedding metadata (ADR-016/017/018).",
+        "properties": {
+          "chunkIndex": {
+            "title": "Chunkindex",
+            "type": "integer"
+          },
+          "documentId": {
+            "title": "Documentid",
+            "type": "string"
+          },
+          "embeddingModel": {
+            "title": "Embeddingmodel",
+            "type": "string"
+          },
+          "embeddingProvider": {
+            "title": "Embeddingprovider",
+            "type": "string"
+          },
+          "endOffset": {
+            "title": "Endoffset",
+            "type": "integer"
+          },
+          "pageNumber": {
+            "title": "Pagenumber",
+            "type": "integer"
+          },
+          "startOffset": {
+            "title": "Startoffset",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tokenCount": {
+            "title": "Tokencount",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "chunkIndex",
+          "pageNumber",
+          "startOffset",
+          "endOffset",
+          "text",
+          "tokenCount",
+          "embeddingProvider",
+          "embeddingModel",
+          "updatedAt"
+        ],
+        "title": "ChunkOut",
+        "type": "object"
+      },
       "DocumentStatusUpdate": {
         "description": "Body for the internal status-callback endpoint n8n uses to report\nprocessing progress (WS-04 -> WS-02, ADR-009).",
         "properties": {
@@ -106,6 +166,56 @@
         "title": "DocumentSummary",
         "type": "object"
       },
+      "ExtractionOut": {
+        "description": "FR-307: extraction results retrievable through the API. FR-306/308:\nprompt and model version travel with every result.",
+        "properties": {
+          "confidenceScore": {
+            "title": "Confidencescore",
+            "type": "number"
+          },
+          "content": {
+            "title": "Content",
+            "type": "object"
+          },
+          "documentId": {
+            "title": "Documentid",
+            "type": "string"
+          },
+          "modelName": {
+            "title": "Modelname",
+            "type": "string"
+          },
+          "modelProvider": {
+            "title": "Modelprovider",
+            "type": "string"
+          },
+          "processingTimestamp": {
+            "format": "date-time",
+            "title": "Processingtimestamp",
+            "type": "string"
+          },
+          "promptId": {
+            "title": "Promptid",
+            "type": "string"
+          },
+          "promptVersion": {
+            "title": "Promptversion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "content",
+          "confidenceScore",
+          "promptId",
+          "promptVersion",
+          "modelProvider",
+          "modelName",
+          "processingTimestamp"
+        ],
+        "title": "ExtractionOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -117,6 +227,46 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "OcrPageOut": {
+        "description": "Mirrors `OcrPage` in packages/api-client/src/index.ts (ADR-011).",
+        "properties": {
+          "confidenceScore": {
+            "title": "Confidencescore",
+            "type": "number"
+          },
+          "documentId": {
+            "title": "Documentid",
+            "type": "string"
+          },
+          "extractedText": {
+            "title": "Extractedtext",
+            "type": "string"
+          },
+          "ocrEngineVersion": {
+            "title": "Ocrengineversion",
+            "type": "string"
+          },
+          "pageNumber": {
+            "title": "Pagenumber",
+            "type": "integer"
+          },
+          "processingTimestamp": {
+            "format": "date-time",
+            "title": "Processingtimestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "pageNumber",
+          "extractedText",
+          "confidenceScore",
+          "processingTimestamp",
+          "ocrEngineVersion"
+        ],
+        "title": "OcrPageOut",
         "type": "object"
       },
       "ReviewCreateRequest": {
@@ -460,6 +610,96 @@
         ]
       }
     },
+    "/api/documents/{document_id}/chunks": {
+      "get": {
+        "description": "RAG chunks + embedding metadata produced by WS-03's embedding pipeline (ADR-016/017/018).",
+        "operationId": "get_document_chunks_api_documents__document_id__chunks_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChunkOut"
+                  },
+                  "title": "Response Get Document Chunks Api Documents  Document Id  Chunks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document Chunks",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/documents/{document_id}/extraction": {
+      "get": {
+        "description": "FR-307: AI extraction results produced by WS-03's extraction pipeline (ADR-012/013).",
+        "operationId": "get_document_extraction_api_documents__document_id__extraction_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document Extraction",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
     "/api/documents/{document_id}/file": {
       "get": {
         "description": "Serve the original stored file for viewing (e.g. WS-01's PDF viewer).",
@@ -496,6 +736,53 @@
           }
         },
         "summary": "Get Document File",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/documents/{document_id}/ocr": {
+      "get": {
+        "description": "FR-207: page-level OCR output produced by WS-03's OCR pipeline (ADR-011).",
+        "operationId": "get_document_ocr_pages_api_documents__document_id__ocr_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OcrPageOut"
+                  },
+                  "title": "Response Get Document Ocr Pages Api Documents  Document Id  Ocr Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document Ocr Pages",
         "tags": [
           "documents"
         ]

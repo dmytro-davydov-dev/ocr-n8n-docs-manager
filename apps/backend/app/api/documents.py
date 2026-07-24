@@ -3,8 +3,11 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.repositories import document_repository
+from app.repositories import chunk_repository, document_repository, extraction_repository, ocr_repository
+from app.schemas.chunk import ChunkOut
 from app.schemas.document import DocumentSummary
+from app.schemas.extraction import ExtractionOut
+from app.schemas.ocr import OcrPageOut
 from app.services import document_service
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -55,3 +58,39 @@ def get_document_file(document_id: str, db: Session = Depends(get_db)) -> Respon
 
     content = document_service.get_document_file(document)
     return Response(content=content, media_type=document.content_type)
+
+
+@router.get("/{document_id}/ocr", response_model=list[OcrPageOut])
+def get_document_ocr_pages(document_id: str, db: Session = Depends(get_db)) -> list[OcrPageOut]:
+    """FR-207: page-level OCR output produced by WS-03's OCR pipeline (ADR-011)."""
+    document = document_repository.get(db, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    pages = ocr_repository.list_for_document(db, document_id)
+    return [OcrPageOut.model_validate(page) for page in pages]
+
+
+@router.get("/{document_id}/extraction", response_model=ExtractionOut)
+def get_document_extraction(document_id: str, db: Session = Depends(get_db)) -> ExtractionOut:
+    """FR-307: AI extraction results produced by WS-03's extraction pipeline (ADR-012/013)."""
+    document = document_repository.get(db, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    extraction = extraction_repository.get_for_document(db, document_id)
+    if extraction is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Extraction not found")
+
+    return ExtractionOut.model_validate(extraction)
+
+
+@router.get("/{document_id}/chunks", response_model=list[ChunkOut])
+def get_document_chunks(document_id: str, db: Session = Depends(get_db)) -> list[ChunkOut]:
+    """RAG chunks + embedding metadata produced by WS-03's embedding pipeline (ADR-016/017/018)."""
+    document = document_repository.get(db, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    chunks = chunk_repository.list_for_document(db, document_id)
+    return [ChunkOut.model_validate(chunk) for chunk in chunks]

@@ -1,11 +1,11 @@
 # Progress
 
-_Last updated:_ 2026-07-24 (WS-02 Phase 1 document ingestion backend)
+_Last updated:_ 2026-07-24 (WS-03 Celery task layer complete: file validation, OCR, AI extraction, chunking/embeddings)
 
 ## Overall Status
 
 - **Current Phase:** Phase 1 – Document Ingestion
-- **Overall Progress:** 27%
+- **Overall Progress:** 38%
 - **Project Status:** 🟢 On Track
 
 ---
@@ -16,10 +16,10 @@ _Last updated:_ 2026-07-24 (WS-02 Phase 1 document ingestion backend)
 |---|---|---:|---|---|
 | Phase 0 – Foundation | ✅ | 100% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
 | Phase 1 – Document Ingestion | 🔶 | 60% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
-| Phase 2 – OCR Pipeline | ☐ | 0% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
-| Phase 3 – AI Extraction | ☐ | 0% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
+| Phase 2 – OCR Pipeline | 🔶 | 60% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
+| Phase 3 – AI Extraction | 🔶 | 50% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | ☐ | 0% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
-| Phase 5 – Search & RAG | ☐ | 0% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
+| Phase 5 – Search & RAG | 🔶 | 25% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
 ---
 
@@ -89,6 +89,70 @@ _Last updated:_ 2026-07-24 (WS-02 Phase 1 document ingestion backend)
   `GET .../review/history` (the Phase-4 audit-history API deliverable).
   11 new passing tests in `apps/backend/tests/test_reviews_api.py`
   (22 total across the backend test suite).
+- WS-03 Processing/AI: Celery task layer (`apps/backend/app/tasks/`), closing
+  out the WS-03 Phase 0/1/2 milestones. Added `documents.validate_file`
+  (Phase 1 — opens the stored PDF with PyMuPDF to catch truncated/corrupt
+  files a content-type check alone would miss) and `documents.run_ocr`
+  (Phase 2 — rasterizes each page via PyMuPDF, runs the configured OCR
+  engine, and persists results page-by-page). Both tasks follow ADR-008's
+  task contract: identifiers-only payloads (`document_id`), state read from
+  the `documents` row before acting (idempotent no-op on documents already
+  past the expected status), transient failures (`self.retry`, e.g. storage
+  or OCR-provider errors) kept distinct from terminal ones (bad PDF, missing
+  native dependency -> `failed` with `error_message`), and durable outcomes
+  written only through the service layer (`document_repository`,
+  `ocr_service`), never raw model writes from a task. Added `OcrPage`
+  (ADR-011: document_id/page_number/extracted_text/confidence_score/
+  processing_timestamp/ocr_engine_version, unique on
+  `(document_id, page_number)` so re-OCRing a page upserts instead of
+  duplicating) with migration `0004_ocr_pages`, plus `GET
+  /api/documents/{id}/ocr` — the endpoint `packages/api-client`'s
+  `getOcrPages` already expected, matching the `OcrPage` TS interface
+  field-for-field. OCR engine selection is provider-agnostic
+  (`app/services/ocr_engine.py`): an `OcrEngine` protocol, a `PaddleOcrEngine`
+  (ADR-010, lazy-imports `paddleocr` so the heavy native dependency isn't
+  required just to import the module) and a `NullOcrEngine`, chosen purely by
+  the `OCR_ENGINE` config value — no code change needed to swap engines,
+  per the WS-03 Done Criteria. 8 new passing tests
+  (`apps/backend/tests/test_ocr_pipeline.py`, 30 total across the backend
+  suite) cover idempotency under simulated duplicate/retried delivery,
+  retry-vs-terminal failure classification, and the `/ocr` response
+  contract, using a fake `OcrEngine` injected into the task (paddleocr
+  itself was not runnable in this dev shell — see Technical Debt).
+- WS-03 Processing/AI: extraction + chunking/embedding tasks, closing the
+  WS-03 Done Criteria's last open bullet ("OCR engine, LLM provider, and
+  embedding model are all swappable via configuration"). Added
+  `documents.extract_fields` (Phase 3): runs once a document is `complete`
+  (OCR done), concatenates its `OcrPage` text, calls the configured
+  `LlmProvider` with a versioned prompt file
+  (`app/prompts/contract_extraction_v1.md`, ADR-013: front-matter records
+  `prompt_id`/`prompt_version`), and validates the JSON response against a
+  Pydantic schema (`ExtractedContractFields` — parties, dates, monetary
+  values, key clauses, obligations per PRD-3) before persisting it to a new
+  `extractions` table (migration `0005`, one row per document, upserted —
+  idempotent). Schema-validation failures are logged and treated as
+  terminal (FR-303/304, deterministic for the same input); LLM/network
+  errors go through `self.retry`. Added `documents.generate_embeddings`
+  (Phase 5's pipeline slice — WS-03 owns chunking/embedding generation
+  only, not the search/chat APIs, which are out of this workstream's
+  scope): chunks each document's OCR text with configurable token
+  limit/overlap and page/offset metadata (`app/services/chunking.py`,
+  ADR-018), embeds each chunk via the configured `EmbeddingProvider`, and
+  upserts into a new `chunks` table (migration `0006`, unique on
+  `document_id`+`chunk_index`; any chunk left over from a prior run with a
+  different config is dropped via `chunk_repository.delete_from_index`).
+  Both new providers (`app/services/llm_provider.py`,
+  `app/services/embedding_provider.py`) follow the same shape as
+  `OcrEngine`: a single OpenAI-compatible HTTP client (ADR-012/017 — this
+  covers OpenAI, Azure OpenAI, Ollama, and vLLM through one implementation,
+  since they all speak the same API) selected via `LLM_PROVIDER`/
+  `EMBEDDING_PROVIDER`, swappable by config alone. Added
+  `GET /api/documents/{id}/extraction` and `GET /api/documents/{id}/chunks`.
+  9 new passing tests (`apps/backend/tests/test_ai_pipeline.py`, 39 total
+  across the backend suite) cover idempotency, retry-vs-terminal
+  classification (including schema-validation failures), and stale-chunk
+  cleanup, using fake providers injected into the tasks — neither task has
+  been run against a live LLM/embedding endpoint (see Technical Debt).
 
 ## In Progress
 
@@ -146,6 +210,45 @@ _Last updated:_ 2026-07-24 (WS-02 Phase 1 document ingestion backend)
   `make export-openapi`; the hand-written TS client in
   `packages/api-client/src/index.ts` is not yet generated _from_ it (still
   a manually-kept mirror of the same contract).
+- WS-03's Celery tasks (`documents.validate_file`, `documents.run_ocr`) are
+  implemented and unit-tested but nothing dispatches them yet: WS-04's n8n
+  ingestion workflow (`n8n/` is still empty, see above) is what will call
+  them after upload. Today a document can reach `queued` but nothing moves
+  it to `processing`/`complete` outside of a test calling the task function
+  directly.
+- `paddleocr`/`paddlepaddle` were added to `apps/backend/requirements.txt`
+  per ADR-010 but could not be installed/exercised in this dev shell
+  (native build deps unavailable outside Docker); `PaddleOcrEngine` is
+  implemented with a lazy import specifically so this doesn't block testing,
+  but it has only been verified via `python -m compileall`, not a real OCR
+  run. That needs a pass in the actual `celery-worker` container before
+  Phase 2 can be called done end-to-end.
+- `documents.extract_fields` and `documents.generate_embeddings` are
+  implemented and unit-tested with fake providers, but neither has been run
+  against a real OpenAI-compatible endpoint — `LLM_BASE_URL`/
+  `EMBEDDING_BASE_URL` are unset by default (see `.env.example`), so both
+  tasks currently return `"provider_unavailable"` and leave the document's
+  `extractions`/`chunks` rows untouched until an operator points them at a
+  real or self-hosted (e.g. Ollama) endpoint. This is the same
+  fail-fast-over-silent-fallback posture as `OCR_ENGINE`.
+- `chunks.embedding` is stored as a JSON float array, not a native
+  `pgvector` column, even though ADR-016 selects pgvector. The shared
+  Postgres image doesn't provision the `vector` extension yet (that's
+  WS-05 infra work), and a JSON column keeps the model portable to the
+  SQLite test database this suite runs against. Swapping in a real
+  `Vector` column (and an ANN index) is a follow-up migration once WS-05
+  ships the extension — Phase 5's actual search/retrieval API (out of
+  WS-03's scope regardless, see PRD-5) will need it.
+- Like OCR, nothing dispatches `extract_fields`/`generate_embeddings`
+  automatically yet — that's WS-04's n8n orchestration (FR-301: "OCR
+  completion triggers AI extraction"), still unbuilt (`n8n/` is empty).
+- The document status state machine (`document_repository.ALLOWED_TRANSITIONS`)
+  has no transition back out of `complete`/`failed`, so there is currently
+  no supported way to re-run OCR on an already-processed document even
+  though `ocr_repository.upsert_page` is idempotent and would handle it
+  correctly if reached. ADR-011 anticipates reprocessing as a benefit of the
+  page-level storage model; wiring an actual retry/reprocess transition is
+  unstarted.
 
 ## Open Questions
 

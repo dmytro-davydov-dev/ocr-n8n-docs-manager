@@ -1,11 +1,11 @@
 # Progress
 
-_Last updated:_ 2026-07-24 (WS-03 Celery task layer complete: file validation, OCR, AI extraction, chunking/embeddings)
+_Last updated:_ 2026-07-24 (WS-04 n8n workflow orchestration: upload/processing workflows, internal pipeline-trigger endpoint, processing watchdog)
 
 ## Overall Status
 
 - **Current Phase:** Phase 1 – Document Ingestion
-- **Overall Progress:** 38%
+- **Overall Progress:** 43%
 - **Project Status:** 🟢 On Track
 
 ---
@@ -15,9 +15,9 @@ _Last updated:_ 2026-07-24 (WS-03 Celery task layer complete: file validation, O
 | Phase | Status | Progress | PRD | ADRs |
 |---|---|---:|---|---|
 | Phase 0 – Foundation | ✅ | 100% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
-| Phase 1 – Document Ingestion | 🔶 | 60% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
-| Phase 2 – OCR Pipeline | 🔶 | 60% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
-| Phase 3 – AI Extraction | 🔶 | 50% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
+| Phase 1 – Document Ingestion | 🔶 | 80% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
+| Phase 2 – OCR Pipeline | 🔶 | 70% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
+| Phase 3 – AI Extraction | 🔶 | 60% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | ☐ | 0% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
 | Phase 5 – Search & RAG | 🔶 | 25% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
@@ -154,6 +154,50 @@ _Last updated:_ 2026-07-24 (WS-03 Celery task layer complete: file validation, O
   cleanup, using fake providers injected into the tasks — neither task has
   been run against a live LLM/embedding endpoint (see Technical Debt).
 
+- WS-04 n8n: workflow orchestration (ADR-009), closing WS-04's Phase 0/1
+  milestones and most of Phase 2/3. Added the internal endpoint n8n needed
+  but that didn't exist yet, `POST /api/internal/documents/{id}/process`
+  (`apps/backend/app/api/internal.py`) -- dispatches a Celery `chain`
+  (`validate_file -> run_ocr -> extract_fields -> generate_embeddings`) so
+  n8n never touches the Celery broker or application tables directly, only
+  WS-02's authenticated internal API (WS-04's core constraint). Dispatch is
+  safe under retry/duplicate calls for free: every task in the chain
+  already re-checks the document's current status before acting (WS-03's
+  idempotency design), so re-dispatching against a document that's already
+  mid-pipeline or done just runs a chain of no-ops. 3 new passing tests
+  (`apps/backend/tests/test_internal_processing.py`, 42 total across the
+  backend suite) cover auth, 404, and the dispatched chain (mocked, no
+  broker needed). Verified live against the real stack too: dispatched the
+  chain through the actual Redis broker/Celery worker via
+  `docker compose up` and confirmed in worker logs that all four tasks ran
+  in order and no-op'd cleanly on an already-`failed` document.
+  Added `n8n/workflows/` (previously empty) with three version-controlled
+  workflow exports: `00-internal-api-smoke-test.json` (Phase 0 -- manual
+  trigger calling the authenticated `/internal/ping` endpoint, satisfying
+  the literal Phase 0 milestone), `01-document-upload-ingestion.json`
+  (Phase 1 -- the webhook `N8N_WEBHOOK_URL`/`document_service.py` already
+  called with no receiver; now calls `/process` and responds), and
+  `02-processing-watchdog.json` (Phase 2/3 -- polls `GET /api/documents`
+  every 10 min and surfaces `failed`/stuck documents in n8n's execution
+  history for escalation). All three were validated by importing them into
+  a real n8n 1.71.3 instance (`n8n import:workflow`), not just JSON-parsed.
+  Wired `docker-compose.yml`'s `n8n` service to auto-import
+  `n8n/workflows/` on every container start (`n8n import:workflow
+  --separate && exec n8n`), so the committed JSON is enforced as the
+  source of truth on restart rather than the runtime silently drifting
+  from it (WS-04 Done Criteria). No real credentials appear in the
+  exports -- HTTP Request nodes reference an `Internal API Key` credential
+  by id/name only; the actual header value is entered by hand in the n8n
+  UI post-import (documented in `n8n/workflows/README.md`, along with why
+  n8n auto-deactivates `01`/`02` on first boot until that credential
+  exists).
+  The watchdog deliberately does not auto-retry failed documents: doing so
+  would silently no-op today, since there's no `failed`/`complete` ->
+  requeue transition in `document_repository.ALLOWED_TRANSITIONS` (see
+  Technical Debt) -- it only surfaces them, which is honest about what's
+  actually safe to automate right now versus faking a retry that wouldn't
+  work.
+
 ## In Progress
 
 - WS-01 Frontend: Phase 1 upload UI. Added drag-and-drop upload with per-file
@@ -184,13 +228,17 @@ _Last updated:_ 2026-07-24 (WS-03 Celery task layer complete: file validation, O
 
 ## Technical Debt
 
-- WS-04 has not shipped the n8n upload workflow yet (`n8n/` is empty), so
-  `N8N_WEBHOOK_URL` has no real receiver. Every upload against the real
-  backend currently ends in `status: "failed"` with
-  `errorMessage: "Failed to trigger processing workflow"` rather than
-  advancing to `queued`/`processing`/`complete` — this is intentional
-  (FR-105's trigger step genuinely fails) and will resolve once WS-04
-  delivers the workflow.
+- WS-04's upload workflow (`n8n/workflows/01-document-upload-ingestion.json`)
+  now exists and is exported `active: true`, but n8n auto-deactivates any
+  imported workflow whose referenced credential doesn't exist yet -- so on
+  a fresh instance (including a freshly `docker compose up`'d one) it
+  imports inactive until an operator manually creates the `Internal API
+  Key` HTTP Header Auth credential in the n8n UI and reactivates it (see
+  `n8n/workflows/README.md`; this is a one-time step, same as any other
+  secret that can't be committed). Until that's done, every upload still
+  ends in `status: "failed"` with
+  `errorMessage: "Failed to trigger processing workflow"`, same symptom as
+  before WS-04 shipped anything -- don't mistake it for a regression.
 - `apps/frontend/src/mocks/mockDocumentsApi.ts` (gated by
   `VITE_ENABLE_API_MOCKS`) is still in place; WS-02's real `/documents`
   endpoints now exist but WS-01 owns the decision of when to retire the
@@ -210,12 +258,14 @@ _Last updated:_ 2026-07-24 (WS-03 Celery task layer complete: file validation, O
   `make export-openapi`; the hand-written TS client in
   `packages/api-client/src/index.ts` is not yet generated _from_ it (still
   a manually-kept mirror of the same contract).
-- WS-03's Celery tasks (`documents.validate_file`, `documents.run_ocr`) are
-  implemented and unit-tested but nothing dispatches them yet: WS-04's n8n
-  ingestion workflow (`n8n/` is still empty, see above) is what will call
-  them after upload. Today a document can reach `queued` but nothing moves
-  it to `processing`/`complete` outside of a test calling the task function
-  directly.
+- WS-03's Celery tasks now have a real dispatcher (WS-04's
+  `POST /api/internal/documents/{id}/process`, see WS-04 entry above under
+  Completed), but a document only reaches that endpoint via n8n's upload
+  workflow, which needs the `Internal API Key` credential created by hand
+  first (see the WS-04 bullet below). Until that one-time step is done in
+  a given environment, a document can still reach `queued` but nothing
+  moves it to `processing`/`complete` outside of a test or a manual
+  `curl` calling `/process` directly.
 - `paddleocr`/`paddlepaddle` were added to `apps/backend/requirements.txt`
   per ADR-010 but could not be installed/exercised in this dev shell
   (native build deps unavailable outside Docker); `PaddleOcrEngine` is
@@ -239,9 +289,6 @@ _Last updated:_ 2026-07-24 (WS-03 Celery task layer complete: file validation, O
   `Vector` column (and an ANN index) is a follow-up migration once WS-05
   ships the extension — Phase 5's actual search/retrieval API (out of
   WS-03's scope regardless, see PRD-5) will need it.
-- Like OCR, nothing dispatches `extract_fields`/`generate_embeddings`
-  automatically yet — that's WS-04's n8n orchestration (FR-301: "OCR
-  completion triggers AI extraction"), still unbuilt (`n8n/` is empty).
 - The document status state machine (`document_repository.ALLOWED_TRANSITIONS`)
   has no transition back out of `complete`/`failed`, so there is currently
   no supported way to re-run OCR on an already-processed document even

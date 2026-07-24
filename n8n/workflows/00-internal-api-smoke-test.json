@@ -1,0 +1,62 @@
+{
+  "name": "00 - Internal API Smoke Test",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://backend:8000/api/internal/ping",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000002",
+      "name": "Ping Internal API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "internal-api-key",
+          "name": "Internal API Key"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Ping Internal API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "description": "WS-04 Phase 0 milestone: n8n calls an authenticated internal backend endpoint. Run manually to confirm n8n <-> backend connectivity and the Internal API Key credential are both wired up (ADR-009)."
+  },
+  "id": "ws04-00-internal-api-smoke-test",
+  "tags": [],
+  "active": false
+}

@@ -1,0 +1,124 @@
+{
+  "name": "01 - Document Upload Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "document-uploaded",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000101",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "ws04-document-uploaded"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://backend:8000/api/internal/documents/{{ $json.body.document_id }}/process",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000102",
+      "name": "Trigger Processing Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "internal-api-key",
+          "name": "Internal API Key"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"triggered\", \"documentId\": $('Webhook').item.json.body.document_id, \"taskId\": $json.task_id } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000103",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"trigger_failed\", \"documentId\": $('Webhook').item.json.body.document_id } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000104",
+      "name": "Respond Failure",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Trigger Processing Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Processing Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "description": "WS-04 Phase 1 milestone: triggered by the backend's upload-trigger callback (N8N_WEBHOOK_URL -> POST /webhook/document-uploaded, {document_id}). Calls the single internal endpoint that dispatches the whole Celery processing chain (validate -> OCR -> extract -> embed). n8n never touches the broker or application tables directly (ADR-009). Idempotent: every task in the dispatched chain re-checks the document's current status before acting, so duplicate webhook delivery for the same document_id is a safe no-op, not a duplicate run."
+  },
+  "id": "ws04-01-document-upload-ingestion",
+  "tags": [],
+  "active": true
+}

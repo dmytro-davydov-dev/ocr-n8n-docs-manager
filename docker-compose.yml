@@ -87,6 +87,9 @@ services:
 
   n8n:
     image: n8nio/n8n:1.71.3
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "n8n import:workflow --separate --input=/workflows && exec n8n"
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: ${N8N_DB_HOST:-postgres}
@@ -103,6 +106,7 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
       - documents:/documents
+      - ./n8n/workflows:/workflows:ro
     ports:
       - "5678:5678"
     healthcheck:

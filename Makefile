@@ -1,6 +1,6 @@
 COMPOSE ?= docker compose
 
-.PHONY: up down reset logs verify-phase0 test-backend-auth test-backend export-openapi verify-openapi
+.PHONY: up down reset logs verify-phase0 verify-infra test-backend-auth test-backend export-openapi verify-openapi
 
 up:
 	$(COMPOSE) up --build
@@ -30,6 +30,14 @@ verify-phase0:
 	@echo "[verify] redis ping succeeded"
 	$(COMPOSE) exec -T celery-worker celery -A app.celery_app:celery_app inspect ping
 	@echo "[verify] celery worker responds to inspect ping"
+
+verify-infra:
+	@$(COMPOSE) exec -T postgres psql -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-contracts} -tAc "SELECT 1 FROM pg_extension WHERE extname = 'vector'" | grep -q 1
+	@echo "[verify] pgvector extension is enabled on the application database"
+	@$(COMPOSE) exec -T postgres psql -U $${N8N_DB_USER:-n8n} -d $${N8N_DB_NAME:-n8n} -tAc "SELECT current_user" | grep -q "$${N8N_DB_USER:-n8n}"
+	@echo "[verify] n8n connects with its own isolated Postgres role"
+	@! $(COMPOSE) exec -T postgres psql -U $${N8N_DB_USER:-n8n} -d $${POSTGRES_DB:-contracts} -tAc "SELECT 1" >/dev/null 2>&1
+	@echo "[verify] n8n's role cannot access the application database"
 
 test-backend-auth:
 	@if cd apps/backend && python3 -c "import fastapi" >/dev/null 2>&1; then \

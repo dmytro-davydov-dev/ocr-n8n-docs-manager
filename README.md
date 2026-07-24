@@ -113,14 +113,37 @@ Copy `.env.example` to `.env` and adjust values as needed.
 | N8N_DB_HOST | n8n PostgreSQL host | postgres |
 | N8N_DB_PORT | n8n PostgreSQL port | 5432 |
 | N8N_DB_NAME | n8n PostgreSQL database name | n8n |
-| N8N_DB_USER | n8n PostgreSQL username | postgres |
-| N8N_DB_PASSWORD | n8n PostgreSQL password | postgres |
+| N8N_DB_USER | n8n PostgreSQL username (dedicated role, isolated from POSTGRES_USER) | n8n |
+| N8N_DB_PASSWORD | n8n PostgreSQL password (dedicated role, isolated from POSTGRES_PASSWORD) | n8n-change-me |
 | N8N_HOST | n8n service host | localhost |
 | N8N_PORT | n8n service port | 5678 |
 | N8N_PROTOCOL | n8n protocol | http |
 | N8N_SECURE_COOKIE | n8n secure cookie mode | false |
 | GENERIC_TIMEZONE | n8n timezone | UTC |
 | N8N_ENCRYPTION_KEY | n8n credential encryption key | replace-this-key |
+| OCR_ENGINE | OCR engine implementation (ADR-010): `paddleocr` or `null` | paddleocr |
+| OCR_RASTERIZE_DPI | Page rasterization DPI before OCR | 200 |
+| OCR_MAX_RETRIES | Celery retry attempts for transient OCR failures | 3 |
+| LLM_PROVIDER | LLM client implementation (ADR-012) | openai_compatible |
+| LLM_BASE_URL | OpenAI-compatible LLM endpoint (OpenAI, Azure OpenAI, Ollama, vLLM); extraction fails fast if unset | (unset) |
+| LLM_API_KEY | LLM provider API key | (unset) |
+| LLM_MODEL | LLM model name | gpt-4o-mini |
+| LLM_TIMEOUT_SECONDS | LLM request timeout | 60 |
+| LLM_MAX_RETRIES | Celery retry attempts for transient LLM failures | 3 |
+| EMBEDDING_PROVIDER | Embedding client implementation (ADR-017) | openai_compatible |
+| EMBEDDING_BASE_URL | OpenAI-compatible embedding endpoint; embedding generation fails fast if unset | (unset) |
+| EMBEDDING_API_KEY | Embedding provider API key | (unset) |
+| EMBEDDING_MODEL | Embedding model name | text-embedding-3-small |
+| EMBEDDING_TIMEOUT_SECONDS | Embedding request timeout | 30 |
+| EMBEDDING_MAX_RETRIES | Celery retry attempts for transient embedding failures | 3 |
+| CHUNK_TOKEN_LIMIT | Max tokens (whitespace-approximated) per chunk (ADR-018) | 500 |
+| CHUNK_OVERLAP_TOKENS | Token overlap between consecutive chunks | 50 |
+| WORKER_CPU_LIMIT | celery-worker CPU limit (Phase 2: OCR is CPU-heavy) | 2 |
+| WORKER_MEMORY_LIMIT | celery-worker memory limit | 4G |
+| WORKER_CPU_RESERVATION | celery-worker CPU reservation | 0.5 |
+| WORKER_MEMORY_RESERVATION | celery-worker memory reservation | 1G |
+
+The `postgres` service runs the `pgvector/pgvector:pg16` image with the `vector` extension enabled on the application database (ADR-016), ready for WS-02/WS-03 to migrate `chunks.embedding` to a native `vector` column. The `n8n` service uses its own Postgres role (`N8N_DB_USER`/`N8N_DB_PASSWORD`), isolated from the application's credentials — both are provisioned by `infra/postgres-init.sh` on first boot of an empty `postgres_data` volume.
 
 ## Documentation
 

@@ -27,6 +27,27 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-contracts}}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      DOCUMENTS_STORAGE_PATH: ${DOCUMENTS_STORAGE_PATH:-/documents}
+      MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-52428800}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/document-uploaded}
+      N8N_WEBHOOK_TIMEOUT_SECONDS: ${N8N_WEBHOOK_TIMEOUT_SECONDS:-5}
+      OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
+      OCR_RASTERIZE_DPI: ${OCR_RASTERIZE_DPI:-200}
+      OCR_MAX_RETRIES: ${OCR_MAX_RETRIES:-3}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai_compatible}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-30}
+      EMBEDDING_MAX_RETRIES: ${EMBEDDING_MAX_RETRIES:-3}
+      CHUNK_TOKEN_LIMIT: ${CHUNK_TOKEN_LIMIT:-500}
+      CHUNK_OVERLAP_TOKENS: ${CHUNK_OVERLAP_TOKENS:-50}
     volumes:
       - documents:/documents
     depends_on:
@@ -52,21 +73,50 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-contracts}}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      DOCUMENTS_STORAGE_PATH: ${DOCUMENTS_STORAGE_PATH:-/documents}
+      OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
+      OCR_RASTERIZE_DPI: ${OCR_RASTERIZE_DPI:-200}
+      OCR_MAX_RETRIES: ${OCR_MAX_RETRIES:-3}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai_compatible}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-30}
+      EMBEDDING_MAX_RETRIES: ${EMBEDDING_MAX_RETRIES:-3}
+      CHUNK_TOKEN_LIMIT: ${CHUNK_TOKEN_LIMIT:-500}
+      CHUNK_OVERLAP_TOKENS: ${CHUNK_OVERLAP_TOKENS:-50}
     volumes:
       - documents:/documents
+    deploy:
+      resources:
+        limits:
+          cpus: "${WORKER_CPU_LIMIT:-2}"
+          memory: ${WORKER_MEMORY_LIMIT:-4G}
+        reservations:
+          cpus: "${WORKER_CPU_RESERVATION:-0.5}"
+          memory: ${WORKER_MEMORY_RESERVATION:-1G}
     depends_on:
       redis:
         condition: service_healthy
 
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-contracts}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      N8N_DB_NAME: ${N8N_DB_NAME:-n8n}
+      N8N_DB_USER: ${N8N_DB_USER:-n8n}
+      N8N_DB_PASSWORD: ${N8N_DB_PASSWORD:-n8n-change-me}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infra/postgres-init.sql:/docker-entrypoint-initdb.d/postgres-init.sql:ro
+      - ./infra/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh:ro
     ports:
       - "5432:5432"
     healthcheck:
@@ -95,8 +145,8 @@ services:
       DB_POSTGRESDB_HOST: ${N8N_DB_HOST:-postgres}
       DB_POSTGRESDB_PORT: ${N8N_DB_PORT:-5432}
       DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME:-n8n}
-      DB_POSTGRESDB_USER: ${N8N_DB_USER:-postgres}
-      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:-postgres}
+      DB_POSTGRESDB_USER: ${N8N_DB_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:-n8n-change-me}
       N8N_HOST: ${N8N_HOST:-localhost}
       N8N_PORT: ${N8N_PORT:-5678}
       N8N_PROTOCOL: ${N8N_PROTOCOL:-http}

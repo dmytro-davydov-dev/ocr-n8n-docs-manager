@@ -1,11 +1,11 @@
 # Progress
 
-_Last updated:_ 2026-07-24 (WS-04 n8n workflow orchestration: upload/processing workflows, internal pipeline-trigger endpoint, processing watchdog)
+_Last updated:_ 2026-07-24 (WS-05 infrastructure/DevOps: env-var plumbing fix, celery-worker resource limits, pgvector-enabled Postgres, isolated n8n credentials — WS-05 Done Criteria met)
 
 ## Overall Status
 
 - **Current Phase:** Phase 1 – Document Ingestion
-- **Overall Progress:** 43%
+- **Overall Progress:** 45%
 - **Project Status:** 🟢 On Track
 
 ---
@@ -16,10 +16,10 @@ _Last updated:_ 2026-07-24 (WS-04 n8n workflow orchestration: upload/processing 
 |---|---|---:|---|---|
 | Phase 0 – Foundation | ✅ | 100% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
 | Phase 1 – Document Ingestion | 🔶 | 80% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
-| Phase 2 – OCR Pipeline | 🔶 | 70% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
-| Phase 3 – AI Extraction | 🔶 | 60% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
+| Phase 2 – OCR Pipeline | 🔶 | 75% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
+| Phase 3 – AI Extraction | 🔶 | 65% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | ☐ | 0% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
-| Phase 5 – Search & RAG | 🔶 | 25% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
+| Phase 5 – Search & RAG | 🔶 | 30% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
 ---
 
@@ -198,6 +198,53 @@ _Last updated:_ 2026-07-24 (WS-04 n8n workflow orchestration: upload/processing 
   actually safe to automate right now versus faking a retry that wouldn't
   work.
 
+- WS-05 Infrastructure/DevOps: closed out all of WS-05's Done Criteria and
+  its remaining Phase 2/3/5 milestones. Found and fixed a real bug while
+  auditing the compose file against WS-03's `Settings` class: `OCR_ENGINE`,
+  `LLM_*`, `EMBEDDING_*`, `CHUNK_*`, `DOCUMENTS_STORAGE_PATH`, and
+  `N8N_WEBHOOK_URL`/`_TIMEOUT_SECONDS` were documented in `.env.example` and
+  the README table but never forwarded into the `backend`/`celery-worker`
+  containers' `environment:` blocks in `docker-compose.yml` -- Pydantic's
+  `Settings(env_file=".env")` only reads a `.env` file that doesn't exist
+  inside those containers (the root `.env` isn't copied into the
+  `apps/backend` build context), so every one of those settings was silently
+  falling back to its code default regardless of what operators put in
+  `.env`. Editing `.env` and restarting the stack did nothing for OCR
+  engine/LLM/embedding provider selection until this was fixed -- this
+  directly blocked the WS-05 Phase 3 milestone ("LLM/embedding provider
+  credentials and endpoints configurable via env, no code changes"), which
+  was previously true only in the Python code, not in the running compose
+  stack. Added `cpus`/`memory` limits (`deploy.resources`, configurable via
+  new `WORKER_CPU_LIMIT`/`WORKER_MEMORY_LIMIT`/*_RESERVATION env vars) to
+  `celery-worker`, closing the Phase 2 milestone ("OCR engine resourced").
+  Switched the `postgres` service to the `pgvector/pgvector:pg16` image and
+  added `infra/postgres-init.sh` (replacing `postgres-init.sql`) which runs
+  `CREATE EXTENSION IF NOT EXISTS vector` on the app database, closing the
+  Phase 5 milestone ("pgvector extension enabled; vector indexes
+  creatable") -- verified by creating a real `vector(3)` column with an
+  `hnsw` index and running a `<->` similarity query against it (scratch
+  table, dropped after). The same init script also gives n8n its own
+  Postgres role (`N8N_DB_USER`/`N8N_DB_PASSWORD`, defaulting to
+  `n8n`/`n8n-change-me`) with `CONNECT` revoked on the app database and
+  vice versa, closing the WS-05 Done Criteria bullet "Application and n8n
+  persistence are isolated (separate DB/schema/credentials)" -- previously
+  n8n and the app shared the same Postgres user/password and only the
+  database name differed. Applied all of this to the already-running local
+  dev stack without a volume wipe: enabled the extension and locked down
+  `CONNECT` on the live `contracts` db, then created the `n8n` role and
+  reassigned ownership of all 33 existing tables/6 sequences/the `public`
+  schema in the live `n8n` database to it (per-object `ALTER ... OWNER TO`,
+  since `REASSIGN OWNED BY postgres` fails on Postgres's bootstrap
+  superuser role) -- the n8n instance's existing workflows/credentials
+  (including the manually-configured `Internal API Key` credential from
+  WS-04, see Technical Debt) were preserved, not reset. Verified end-to-end
+  against the live stack: `make verify-phase0` (unchanged, still green),
+  a new `make verify-infra` target (pgvector extension present, n8n
+  connects with its own role, n8n's role is denied `CONNECT` on the app
+  db), and the full 42-test backend suite (`make test-backend`), all
+  passing. Updated the README env var table and `.env.example` with the
+  newly-plumbed and newly-added variables.
+
 ## In Progress
 
 - WS-01 Frontend: Phase 1 upload UI. Added drag-and-drop upload with per-file
@@ -282,12 +329,15 @@ _Last updated:_ 2026-07-24 (WS-04 n8n workflow orchestration: upload/processing 
   real or self-hosted (e.g. Ollama) endpoint. This is the same
   fail-fast-over-silent-fallback posture as `OCR_ENGINE`.
 - `chunks.embedding` is stored as a JSON float array, not a native
-  `pgvector` column, even though ADR-016 selects pgvector. The shared
-  Postgres image doesn't provision the `vector` extension yet (that's
-  WS-05 infra work), and a JSON column keeps the model portable to the
-  SQLite test database this suite runs against. Swapping in a real
-  `Vector` column (and an ANN index) is a follow-up migration once WS-05
-  ships the extension — Phase 5's actual search/retrieval API (out of
+  `pgvector` column, even though ADR-016 selects pgvector. WS-05 now
+  provisions the `vector` extension (`postgres` runs
+  `pgvector/pgvector:pg16`, verified with a real `vector(3)`/`hnsw` probe —
+  see WS-05 entry above under Completed), so this is no longer blocked on
+  infra. A JSON column still keeps the model portable to the SQLite test
+  database this suite runs against, so swapping in a real `Vector` column
+  (and an ANN index, plus a decision on whether to keep SQLite-compatible
+  tests or move them onto Postgres) is a WS-02/WS-03 follow-up migration,
+  not further WS-05 work — Phase 5's actual search/retrieval API (out of
   WS-03's scope regardless, see PRD-5) will need it.
 - The document status state machine (`document_repository.ALLOWED_TRANSITIONS`)
   has no transition back out of `complete`/`failed`, so there is currently

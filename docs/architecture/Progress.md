@@ -14,14 +14,12 @@ _Last updated:_ 2026-07-24
 
 | Phase | Status | Progress | PRD | ADRs |
 |---|---|---:|---|---|
-| Phase 0 – Foundation | 🟡 | 60% | ☐ | ☐ |
-| Phase 1 – Document Ingestion | ☐ | 0% | ☐ | ☐ |
-| Phase 2 – n8n Orchestration | ☐ | 0% | ☐ | ☐ |
-| Phase 3 – PDF Extraction | ☐ | 0% | ☐ | ☐ |
-| Phase 4 – OCR | ☐ | 0% | ☐ | ☐ |
-| Phase 5 – AI Extraction | ☐ | 0% | ☐ | ☐ |
-| Phase 6 – Review UI | ☐ | 0% | ☐ | ☐ |
-| Phase 7 – Hardening | ☐ | 0% | ☐ | ☐ |
+| Phase 0 – Foundation | 🟡 | 60% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
+| Phase 1 – Document Ingestion | ☐ | 0% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
+| Phase 2 – OCR Pipeline | ☐ | 0% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
+| Phase 3 – AI Extraction | ☐ | 0% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
+| Phase 4 – Contract Review UI | ☐ | 0% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
+| Phase 5 – Search & RAG | ☐ | 0% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
 ---
 
@@ -73,9 +71,26 @@ _Last updated:_ 2026-07-24
 
 ## Architecture Decisions
 
-Link ADRs here, e.g.
-
-- [[../adr/ADR-001-Monorepo]]
+- [[templates/ADR-001-Monorepo|ADR-001 Monorepo]]
+- [[templates/ADR-002-Docker-Compose|ADR-002 Docker Compose]]
+- [[templates/ADR-003-Repository-Structure|ADR-003 Repository Structure]]
+- [[templates/ADR-004-FastAPI-as-Backend-Framework|ADR-004 FastAPI]]
+- [[templates/ADR-005-React-TypeScript-Vite|ADR-005 React + TypeScript + Vite]]
+- [[templates/ADR-006-PostgreSQL-as-Primary-Database|ADR-006 PostgreSQL]]
+- [[templates/ADR-007-Redis-as-Cache-and-Message-Broker|ADR-007 Redis]]
+- [[templates/ADR-008-Celery-for-Background-Processing|ADR-008 Celery]]
+- [[templates/ADR-009-n8n-for-Workflow-Orchestration|ADR-009 n8n]]
+- [[templates/ADR-010-OCR-Engine-Selection|ADR-010 OCR Engine]]
+- [[templates/ADR-011-OCR-Storage-Strategy|ADR-011 OCR Storage]]
+- [[templates/ADR-012-LLM-Provider-Selection|ADR-012 LLM Provider]]
+- [[templates/ADR-013-Prompt-Management-Strategy|ADR-013 Prompt Management]]
+- [[templates/ADR-014-Review-State-Management|ADR-014 Review State]]
+- [[templates/ADR-015-Audit-Logging-Strategy|ADR-015 Audit Logging]]
+- [[templates/ADR-016-Vector-Database-Selection|ADR-016 Vector Database]]
+- [[templates/ADR-017-Embedding-Model-Strategy|ADR-017 Embedding Model]]
+- [[templates/ADR-018-Document-Chunking-Strategy|ADR-018 Document Chunking]]
+- [[templates/ADR-019-Hybrid-Retrieval-Strategy|ADR-019 Hybrid Retrieval]]
+- [[templates/ADR-020-RAG-Orchestration|ADR-020 RAG Orchestration]]
 
 ## Next Milestone
 

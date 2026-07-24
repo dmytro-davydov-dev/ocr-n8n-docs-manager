@@ -137,31 +137,57 @@ Copy `.env.example` to `.env` and adjust values as needed.
 
 ### Product Requirements
 
-- docs/architecture/templates/PRD-Phase-0-Foundation.md
-- docs/architecture/templates/PRD-Phase-1-Document-Ingestion.md
+- [PRD-Phase-0-Foundation](docs/architecture/templates/PRD-Phase-0-Foundation.md)
+- [PRD-Phase-1-Document-Ingestion](docs/architecture/templates/PRD-Phase-1-Document-Ingestion.md)
+- [PRD-Phase-2-OCR-Pipeline](docs/architecture/templates/PRD-Phase-2-OCR-Pipeline.md)
+- [PRD-Phase-3-AI-Extraction](docs/architecture/templates/PRD-Phase-3-AI-Extraction.md)
+- [PRD-Phase-4-Contract-Review-UI](docs/architecture/templates/PRD-Phase-4-Contract-Review-UI.md)
+- [PRD-Phase-5-Search-and-Knowledge-Base-RAG](docs/architecture/templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG.md)
 
 ### Architecture Decision Records
 
-- ADR-001 Monorepo
-- ADR-002 Docker Compose
-- ADR-003 Repository Structure
-- ADR-004 FastAPI
-- ADR-005 React
-- ADR-006 PostgreSQL
-- ADR-007 Redis
-- ADR-008 Celery
-- ADR-009 n8n
+**Foundation**
+
+- [ADR-001 Monorepo](docs/architecture/templates/ADR-001-Monorepo.md)
+- [ADR-002 Docker Compose](docs/architecture/templates/ADR-002-Docker-Compose.md)
+- [ADR-003 Repository Structure](docs/architecture/templates/ADR-003-Repository-Structure.md)
+- [ADR-004 FastAPI](docs/architecture/templates/ADR-004-FastAPI-as-Backend-Framework.md)
+- [ADR-005 React + TypeScript + Vite](docs/architecture/templates/ADR-005-React-TypeScript-Vite.md)
+- [ADR-006 PostgreSQL](docs/architecture/templates/ADR-006-PostgreSQL-as-Primary-Database.md)
+- [ADR-007 Redis](docs/architecture/templates/ADR-007-Redis-as-Cache-and-Message-Broker.md)
+- [ADR-008 Celery](docs/architecture/templates/ADR-008-Celery-for-Background-Processing.md)
+- [ADR-009 n8n](docs/architecture/templates/ADR-009-n8n-for-Workflow-Orchestration.md)
+
+**OCR & AI**
+
+- [ADR-010 OCR Engine Selection](docs/architecture/templates/ADR-010-OCR-Engine-Selection.md)
+- [ADR-011 OCR Storage Strategy](docs/architecture/templates/ADR-011-OCR-Storage-Strategy.md)
+- [ADR-012 LLM Provider Selection](docs/architecture/templates/ADR-012-LLM-Provider-Selection.md)
+- [ADR-013 Prompt Management Strategy](docs/architecture/templates/ADR-013-Prompt-Management-Strategy.md)
+
+**Review & Audit**
+
+- [ADR-014 Review State Management](docs/architecture/templates/ADR-014-Review-State-Management.md)
+- [ADR-015 Audit Logging Strategy](docs/architecture/templates/ADR-015-Audit-Logging-Strategy.md)
+
+**Search & RAG**
+
+- [ADR-016 Vector Database Selection](docs/architecture/templates/ADR-016-Vector-Database-Selection.md)
+- [ADR-017 Embedding Model Strategy](docs/architecture/templates/ADR-017-Embedding-Model-Strategy.md)
+- [ADR-018 Document Chunking Strategy](docs/architecture/templates/ADR-018-Document-Chunking-Strategy.md)
+- [ADR-019 Hybrid Retrieval Strategy](docs/architecture/templates/ADR-019-Hybrid-Retrieval-Strategy.md)
+- [ADR-020 RAG Orchestration](docs/architecture/templates/ADR-020-RAG-Orchestration.md)
 
 ## Development Roadmap
 
-1. Foundation
-2. Upload & Storage
-3. n8n Orchestration
-4. Native PDF Extraction
-5. OCR
-6. AI Extraction
-7. Review Workspace
-8. Hardening
+| Phase | Description | PRD |
+|-------|-------------|-----|
+| 0 | Foundation | [PRD-0](docs/architecture/templates/PRD-Phase-0-Foundation.md) |
+| 1 | Document Ingestion | [PRD-1](docs/architecture/templates/PRD-Phase-1-Document-Ingestion.md) |
+| 2 | OCR Pipeline | [PRD-2](docs/architecture/templates/PRD-Phase-2-OCR-Pipeline.md) |
+| 3 | AI Extraction | [PRD-3](docs/architecture/templates/PRD-Phase-3-AI-Extraction.md) |
+| 4 | Contract Review UI | [PRD-4](docs/architecture/templates/PRD-Phase-4-Contract-Review-UI.md) |
+| 5 | Search & Knowledge Base (RAG) | [PRD-5](docs/architecture/templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG.md) |
 
 ## License
 

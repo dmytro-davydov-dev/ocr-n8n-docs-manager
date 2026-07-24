@@ -1,4 +1,9 @@
-import type { DocumentStatus, DocumentSummary, OcrPage } from "@contract-review/api-client";
+import type {
+  DocumentStatus,
+  DocumentSummary,
+  ExtractionResult,
+  OcrPage,
+} from "@contract-review/api-client";
 
 /**
  * Dev-only mock for the document ingestion + OCR API (PRD-Phase-1-Document-
@@ -19,6 +24,7 @@ let store: DocumentSummary[] = [];
 let idCounter = 0;
 const fileBlobs = new Map<string, Blob>();
 const ocrResults = new Map<string, OcrPage[]>();
+const extractionResults = new Map<string, ExtractionResult>();
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -54,6 +60,27 @@ function generateOcrPages(doc: DocumentSummary): OcrPage[] {
   });
 }
 
+/** Standing in for WS-03's LLM extraction pipeline (PRD-Phase-3-AI-Extraction). */
+function generateExtraction(doc: DocumentSummary): ExtractionResult {
+  return {
+    documentId: doc.id,
+    content: {
+      parties: ["Acme Corp", "Globex Inc"],
+      effective_date: "2026-01-01",
+      termination_date: "2027-01-01",
+      monetary_values: ["$12,000"],
+      key_clauses: ["Confidentiality", "Limitation of liability"],
+      obligations: ["Acme shall deliver monthly reports", "Globex shall pay within 30 days"],
+    },
+    confidenceScore: 0.87,
+    promptId: "contract_extraction",
+    promptVersion: "mock-v1",
+    modelProvider: "mock-llm",
+    modelName: "mock-model-1",
+    processingTimestamp: nowIso(),
+  };
+}
+
 function advanceLifecycle(id: string): void {
   const step = () => {
     const doc = store.find((d) => d.id === id);
@@ -65,6 +92,7 @@ function advanceLifecycle(id: string): void {
 
     if (doc.status === "complete") {
       ocrResults.set(doc.id, generateOcrPages(doc));
+      setTimeout(() => extractionResults.set(doc.id, generateExtraction(doc)), 1500);
     } else {
       setTimeout(step, 1500 + Math.random() * 1500);
     }
@@ -173,6 +201,7 @@ export function installDocumentMocks(baseUrl: string): void {
   const realFetch = window.fetch.bind(window);
   const listUrl = `${baseUrl}${DOCUMENTS_PATH}`;
   const ocrUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)/ocr$`);
+  const extractionUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)/extraction$`);
   const fileUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)/file$`);
   const singleUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)$`);
 
@@ -187,6 +216,12 @@ export function installDocumentMocks(baseUrl: string): void {
     const ocrMatch = url.match(ocrUrlPattern);
     if (ocrMatch) {
       return jsonResponse(ocrResults.get(ocrMatch[1]) ?? []);
+    }
+
+    const extractionMatch = url.match(extractionUrlPattern);
+    if (extractionMatch) {
+      const extraction = extractionResults.get(extractionMatch[1]);
+      return extraction ? jsonResponse(extraction) : jsonResponse({ detail: "Extraction not found" }, 404);
     }
 
     const fileMatch = url.match(fileUrlPattern);

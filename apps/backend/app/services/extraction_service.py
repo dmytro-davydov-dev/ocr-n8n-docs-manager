@@ -44,3 +44,24 @@ def record_extraction(
         },
     )
     db.commit()
+
+
+def record_extraction_failure(
+    db: Session,
+    *,
+    document_id: str,
+    reason: str,
+    actor: str,
+) -> None:
+    """FR-304: schema-validation failures are logged. Written to the audit
+    trail (ADR-015) rather than only the worker log so the extraction API
+    can tell "not yet attempted" apart from "failed validation"."""
+    audit_repository.record(
+        db,
+        entity_type="document",
+        entity_id=document_id,
+        action="extraction_validation_failed",
+        actor=actor,
+        details={"reason": reason},
+    )
+    db.commit()

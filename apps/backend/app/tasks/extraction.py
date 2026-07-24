@@ -83,6 +83,9 @@ def extract_fields(self, document_id: str, provider: LlmProvider | None = None) 
             # FR-303/304: a schema-invalid response is deterministic for the
             # same input+prompt -- log and stop rather than retry blindly.
             logger.warning("extract_fields: validation failed for %s: %s", document_id, exc)
+            extraction_service.record_extraction_failure(
+                db, document_id=document_id, reason=str(exc), actor="celery:extract_fields"
+            )
             return "validation_failed"
 
         # No OpenAI-compatible API returns a per-extraction confidence score,

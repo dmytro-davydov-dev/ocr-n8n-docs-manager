@@ -1211,6 +1211,69 @@
         ]
       }
     },
+    "/api/internal/documents/{document_id}/process": {
+      "post": {
+        "description": "WS-04 (n8n) calls this once per upload to sequence the processing\npipeline (validate -> OCR -> extract -> embed). This is the only path\nn8n has into Celery -- it never touches the broker directly (ADR-009).\n\nDispatching is idempotent even under retry/duplicate webhook delivery:\nevery task in the chain re-reads the document's current status before\nacting and no-ops if it has already moved past the status that task\nexpects (see each task's docstring in app/tasks/), so a duplicate\n`.process` call against a document that's already mid-pipeline or done\njust runs a chain of no-ops rather than reprocessing or duplicating\nrecords.",
+        "operationId": "trigger_document_processing_api_internal_documents__document_id__process_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-internal-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Trigger Document Processing Api Internal Documents  Document Id  Process Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Document Processing",
+        "tags": [
+          "internal"
+        ]
+      }
+    },
     "/api/internal/documents/{document_id}/status": {
       "patch": {
         "description": "WS-04 (n8n) calls this to report processing progress/outcome for a\ndocument it is sequencing. n8n never writes to application tables\ndirectly (ADR-006, ADR-009) \u2014 this endpoint is the only path.",

@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated:_ 2026-07-24 (WS-06 quality/testing/documentation: ADR date fixes, CI migration gate (which caught and fixed real model/migration drift), OCR/extraction regression fixtures, and a cross-workstream ingestion integration test — WS-06 Done Criteria met)
+_Last updated:_ 2026-07-24 (WS-01 frontend: extraction fields panel closing the Phase 3 milestone, plus a backend fix so schema-validation failures are actually queryable through the API instead of only logged)
 
 ## Overall Status
 
@@ -17,7 +17,7 @@ _Last updated:_ 2026-07-24 (WS-06 quality/testing/documentation: ADR date fixes,
 | Phase 0 – Foundation | ✅ | 100% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
 | Phase 1 – Document Ingestion | 🔶 | 80% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
 | Phase 2 – OCR Pipeline | 🔶 | 75% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
-| Phase 3 – AI Extraction | 🔶 | 65% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
+| Phase 3 – AI Extraction | 🔶 | 75% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | ☐ | 0% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
 | Phase 5 – Search & RAG | 🔶 | 30% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
@@ -298,6 +298,43 @@ _Last updated:_ 2026-07-24 (WS-06 quality/testing/documentation: ADR date fixes,
 
 ## In Progress
 
+- WS-01 Frontend: Phase 3 extraction panel, closing the WS-01 Phase 3
+  milestone ("Extraction fields rendered from structured JSON; validation
+  errors surfaced"). Added a panel to `DocumentDetailPage` below the
+  PDF/OCR viewer, backed by a new `ApiClient.getExtraction()` in
+  `packages/api-client` (`ExtractedContractFields`/`ExtractionResult`
+  types) that polls `GET /documents/{id}/extraction` until a result lands,
+  rendering parties/dates/monetary values/key clauses/obligations with a
+  confidence chip and the prompt/model version footer (FR-306/307/308).
+  Investigating "validation errors surfaced" surfaced a real backend gap
+  (WS-02/WS-03, fixed in the same pass since the frontend milestone was not
+  achievable otherwise): `documents.extract_fields`
+  (`apps/backend/app/tasks/extraction.py`) treated a schema-invalid LLM
+  response as terminal (FR-303/304) but only logged it — nothing was
+  persisted, so `GET .../extraction` returned an identical 404 "Extraction
+  not found" whether extraction had never run or had run and failed
+  validation, and there was no way for any client to tell those apart.
+  Added `extraction_service.record_extraction_failure` (writes an
+  `extraction_validation_failed` audit-log entry, ADR-015) and
+  `audit_repository.get_latest`; the endpoint now returns 422 with the
+  validation reason when a prior attempt failed, vs. 404 when none has run
+  yet. Updated `test_ai_pipeline.py`'s validation-failure test for the new
+  422. Extended the dev-only mock (`mockDocumentsApi.ts`) to generate a
+  fake extraction result once a document reaches `complete`, so the panel
+  is demoable without the real backend. Also fixed a pre-existing,
+  unrelated OpenAPI drift: `packages/api-client/openapi.json` was missing
+  WS-04's `/api/internal/documents/{id}/process` endpoint entirely (present
+  on `main` before this change — `make verify-openapi`/CI would have caught
+  it on the next PR touching that file regardless), re-exported via
+  `make export-openapi`. Verified with `tsc -b` (clean) and the full
+  44-test backend suite (`make test-backend` via the backend `.venv`;
+  `make test-backend`'s own docker-compose fallback path only picks up 42 —
+  its container image predates `test_ingestion_integration.py`/
+  `test_regression_fixtures.py` and needs a rebuild, see Technical Debt).
+  Could not verify in an actual browser: the Chrome extension used for
+  browser automation was not connected this session, so the panel's
+  rendering/polling behavior is confirmed by type/unit tests only, not a
+  real click-through.
 - WS-01 Frontend: Phase 1 upload UI. Added drag-and-drop upload with per-file
   progress, a live-polling document list, and `/documents` types/methods in
   `packages/api-client` (list/get/upload), per PRD-Phase-1 FR-101–108.
@@ -397,6 +434,25 @@ _Last updated:_ 2026-07-24 (WS-06 quality/testing/documentation: ADR date fixes,
   correctly if reached. ADR-011 anticipates reprocessing as a benefit of the
   page-level storage model; wiring an actual retry/reprocess transition is
   unstarted.
+
+- The `backend` image `make test-backend`'s docker-compose fallback path
+  runs against is stale: it only discovers 42 of the 44 backend tests,
+  silently skipping `test_ingestion_integration.py` and
+  `test_regression_fixtures.py` (added by WS-06) because the image was
+  never rebuilt after those files were added. `make test-backend` still
+  reports `OK`, which is misleading — it's exercising fewer tests than the
+  repo has, not confirming full coverage. Needs `docker compose build
+  backend` (or equivalent) before it can be trusted again; ran the full
+  44-test suite via `apps/backend/.venv` directly to confirm nothing in
+  this change broke, but that bypasses whatever `make test-backend`'s
+  container path is meant to pin.
+- `apps/frontend/node_modules` was missing the platform-specific
+  `@rollup/rollup-darwin-arm64` optional dependency (a known npm bug,
+  npm/cli#4828), breaking both `vite build` and `vite --host ...` (dev
+  server) with a native-module error unrelated to any source change. Fixed
+  with a plain `npm install` (no lockfile/package.json changes needed) —
+  if this recurs, that's the fix; no need to delete `node_modules`/
+  `package-lock.json` as the error message itself suggests.
 
 ## Open Questions
 

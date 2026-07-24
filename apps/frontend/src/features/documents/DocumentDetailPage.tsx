@@ -20,12 +20,32 @@ import {
   Typography,
 } from "@mui/material";
 
+import { ApiError } from "@contract-review/api-client";
+
 import { api } from "../../api";
 
 function confidenceColor(score: number): ChipProps["color"] {
   if (score >= 0.9) return "success";
   if (score >= 0.75) return "warning";
   return "error";
+}
+
+function FieldList({ label, values }: { label: string; values: string[] }) {
+  if (values.length === 0) return null;
+  return (
+    <Box sx={{ mb: 1.5 }}>
+      <Typography variant="body2" fontWeight={600}>
+        {label}
+      </Typography>
+      <Stack component="ul" sx={{ m: 0, pl: 2.5 }}>
+        {values.map((value, index) => (
+          <Typography key={index} component="li" variant="body2">
+            {value}
+          </Typography>
+        ))}
+      </Stack>
+    </Box>
+  );
 }
 
 /**
@@ -55,6 +75,15 @@ export function DocumentDetailPage() {
     queryKey: ["ocr-pages", id],
     queryFn: () => api.getOcrPages(id),
     enabled: isComplete,
+  });
+
+  const extractionQuery = useQuery({
+    queryKey: ["extraction", id],
+    queryFn: () => api.getExtraction(id),
+    enabled: isComplete,
+    // Extraction runs after OCR completes (FR-301); keep polling until a
+    // result (success or validation failure) lands.
+    refetchInterval: (query) => (query.state.status === "pending" || query.state.data === null ? 3000 : false),
   });
 
   useEffect(() => {
@@ -144,6 +173,67 @@ export function DocumentDetailPage() {
               </List>
             </Paper>
           </Stack>
+        )}
+
+        {isComplete && (
+          <Paper variant="outlined" sx={{ mt: 2, p: 2 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Typography variant="subtitle1">Extracted fields</Typography>
+              {extractionQuery.data && (
+                <Chip
+                  size="small"
+                  label={`${Math.round(extractionQuery.data.confidenceScore * 100)}% confidence`}
+                  color={confidenceColor(extractionQuery.data.confidenceScore)}
+                />
+              )}
+            </Stack>
+            <Divider sx={{ my: 1.5 }} />
+
+            {(extractionQuery.isLoading || (extractionQuery.isSuccess && extractionQuery.data === null)) && (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CircularProgress size={18} />
+                <Typography variant="body2" color="text.secondary">
+                  AI extraction is still running.
+                </Typography>
+              </Stack>
+            )}
+
+            {extractionQuery.isError && (
+              <Alert severity={extractionQuery.error instanceof ApiError && extractionQuery.error.status === 422 ? "warning" : "error"}>
+                {extractionQuery.error instanceof Error
+                  ? extractionQuery.error.message
+                  : "Failed to load extraction results."}
+              </Alert>
+            )}
+
+            {extractionQuery.data && (
+              <Box>
+                <FieldList label="Parties" values={extractionQuery.data.content.parties} />
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={4} sx={{ mb: 1.5 }}>
+                  <Box>
+                    <Typography variant="body2" fontWeight={600}>
+                      Effective date
+                    </Typography>
+                    <Typography variant="body2">{extractionQuery.data.content.effective_date ?? "—"}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" fontWeight={600}>
+                      Termination date
+                    </Typography>
+                    <Typography variant="body2">{extractionQuery.data.content.termination_date ?? "—"}</Typography>
+                  </Box>
+                </Stack>
+                <FieldList label="Monetary values" values={extractionQuery.data.content.monetary_values} />
+                <FieldList label="Key clauses" values={extractionQuery.data.content.key_clauses} />
+                <FieldList label="Obligations" values={extractionQuery.data.content.obligations} />
+                <Divider sx={{ my: 1.5 }} />
+                <Typography variant="caption" color="text.secondary">
+                  Prompt {extractionQuery.data.promptId}@{extractionQuery.data.promptVersion} · model{" "}
+                  {extractionQuery.data.modelProvider}/{extractionQuery.data.modelName}
+                </Typography>
+              </Box>
+            )}
+          </Paper>
         )}
       </Container>
     </>

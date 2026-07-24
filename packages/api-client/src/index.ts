@@ -31,6 +31,36 @@ export interface OcrPage {
   ocrEngineVersion: string;
 }
 
+/**
+ * FR-302/303: structured contract fields validated against the backend's
+ * `ExtractedContractFields` schema. Nested content keys stay snake_case
+ * (they pass through as a raw dict on the backend, not through the
+ * camelCase alias generator the rest of the API contract uses).
+ */
+export interface ExtractedContractFields {
+  parties: string[];
+  effective_date: string | null;
+  termination_date: string | null;
+  monetary_values: string[];
+  key_clauses: string[];
+  obligations: string[];
+}
+
+/**
+ * FR-307/308: AI extraction result, traceable to its prompt and model
+ * version (ADR-013).
+ */
+export interface ExtractionResult {
+  documentId: string;
+  content: ExtractedContractFields;
+  confidenceScore: number;
+  promptId: string;
+  promptVersion: string;
+  modelProvider: string;
+  modelName: string;
+  processingTimestamp: string;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -123,6 +153,30 @@ export class ApiClient {
     }
 
     return (await response.json()) as OcrPage[];
+  }
+
+  /**
+   * FR-307: fetch AI extraction results for a document. Resolves `null`
+   * when extraction hasn't produced a result yet (still processing, or not
+   * dispatched); throws `ApiError` with `status === 422` when extraction
+   * ran but failed schema validation (FR-304), carrying the reason in
+   * `message` for the UI to surface.
+   */
+  async getExtraction(documentId: string): Promise<ExtractionResult | null> {
+    const response = await fetch(`${this.baseUrl}/documents/${documentId}/extraction`);
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const detail = body && typeof body.detail === "string" ? body.detail : undefined;
+      throw new ApiError(
+        detail ?? `Failed to fetch extraction for ${documentId}: ${response.status}`,
+        response.status
+      );
+    }
+
+    return (await response.json()) as ExtractionResult;
   }
 
   /**

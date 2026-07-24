@@ -3,7 +3,13 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.repositories import chunk_repository, document_repository, extraction_repository, ocr_repository
+from app.repositories import (
+    audit_repository,
+    chunk_repository,
+    document_repository,
+    extraction_repository,
+    ocr_repository,
+)
 from app.schemas.chunk import ChunkOut
 from app.schemas.document import DocumentSummary
 from app.schemas.extraction import ExtractionOut
@@ -80,6 +86,20 @@ def get_document_extraction(document_id: str, db: Session = Depends(get_db)) -> 
 
     extraction = extraction_repository.get_for_document(db, document_id)
     if extraction is None:
+        # FR-304: a prior schema-validation failure is queryable via the
+        # audit trail (ADR-015), so "not yet attempted" (404) can be told
+        # apart from "attempted and failed validation" (422).
+        failure = audit_repository.get_latest(
+            db,
+            entity_type="document",
+            entity_id=document_id,
+            action="extraction_validation_failed",
+        )
+        if failure is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Extraction failed schema validation: {failure.details.get('reason', 'unknown error')}",
+            )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Extraction not found")
 
     return ExtractionOut.model_validate(extraction)

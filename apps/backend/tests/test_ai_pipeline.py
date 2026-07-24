@@ -184,7 +184,8 @@ class AiPipelineTest(unittest.TestCase):
 
         self.assertEqual(result, "validation_failed")
         response = self.client.get(f"/api/documents/{document_id}/extraction")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("schema validation", response.json()["detail"])
 
     def test_extract_fields_retries_on_transient_llm_failure(self) -> None:
         document_id = self._make_document("complete", page_texts=["Some contract text"])

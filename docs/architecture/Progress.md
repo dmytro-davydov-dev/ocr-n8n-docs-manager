@@ -5,7 +5,7 @@ _Last updated:_ 2026-07-24
 ## Overall Status
 
 - **Current Phase:** Phase 0 – Foundation
-- **Overall Progress:** 25%
+- **Overall Progress:** 40%
 - **Project Status:** 🟡 In Progress
 
 ---
@@ -14,7 +14,7 @@ _Last updated:_ 2026-07-24
 
 | Phase | Status | Progress | PRD | ADRs |
 |---|---|---:|---|---|
-| Phase 0 – Foundation | 🟡 | 25% | ☐ | ☐ |
+| Phase 0 – Foundation | 🟡 | 40% | ☐ | ☐ |
 | Phase 1 – Upload | ☐ | 0% | ☐ | ☐ |
 | Phase 2 – n8n Orchestration | ☐ | 0% | ☐ | ☐ |
 | Phase 3 – PDF Extraction | ☐ | 0% | ☐ | ☐ |
@@ -43,6 +43,8 @@ _Last updated:_ 2026-07-24
 - Added `docker-compose.yml`, backend/frontend Dockerfiles, `.env.example`, `.gitignore`, and `Makefile`.
 - Verified compose file structure with `docker compose config`.
 - Verified backend syntax with `python3 -m compileall apps/backend`.
+- Added backend internal API key checks for internal endpoints (`/api/internal/ping`).
+- Added n8n container health check (`/healthz`) in Compose.
 
 ## In Progress
 
@@ -59,7 +61,6 @@ _Last updated:_ 2026-07-24
 
 ## Technical Debt
 
-- Add backend internal API key middleware/auth checks beyond environment variable presence.
 - Add richer initial schema and model coverage once Phase 1 starts.
 
 ## Open Questions

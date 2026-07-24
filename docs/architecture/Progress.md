@@ -5,8 +5,8 @@ _Last updated:_ 2026-07-24
 ## Overall Status
 
 - **Current Phase:** Phase 0 – Foundation
-- **Overall Progress:** 60%
-- **Project Status:** 🟡 In Progress
+- **Overall Progress:** 100%
+- **Project Status:** 🟢 On Track
 
 ---
 
@@ -14,7 +14,7 @@ _Last updated:_ 2026-07-24
 
 | Phase | Status | Progress | PRD | ADRs |
 |---|---|---:|---|---|
-| Phase 0 – Foundation | 🟡 | 60% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
+| Phase 0 – Foundation | ✅ | 100% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
 | Phase 1 – Document Ingestion | ☐ | 0% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
 | Phase 2 – OCR Pipeline | ☐ | 0% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
 | Phase 3 – AI Extraction | ☐ | 0% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
@@ -47,19 +47,22 @@ _Last updated:_ 2026-07-24
 - Added backend auth regression test (`apps/backend/tests/test_internal_api_auth.py`) and `make test-backend-auth` command.
 - Parameterized PostgreSQL and n8n service configuration via `.env` values in Compose.
 - Documented environment variables in README and expanded `.env.example` coverage.
+- Resolved Docker Desktop daemon/storage corruption by recreating Docker VM disk image and restarting backend.
+- Completed first full-stack startup verification with `docker compose up --build -d`.
+- Passed `make verify-phase0` acceptance checks (frontend, backend, n8n, postgres, redis, celery).
+- Passed backend internal auth regression tests via `make test-backend-auth`.
 
 ## In Progress
 
-- First full-stack container startup verification (`docker compose up --build`).
+- None.
 
 ## Blockers
 
-- Docker Desktop containerd I/O errors while pulling images (`input/output error`).
-- Local disk space exhaustion during npm dependency install (`ENOSPC`).
+- None.
 
 ## Risks
 
-- Local environment instability may delay Phase 0 acceptance checks until Docker and disk issues are resolved.
+- Docker VM disk growth may reintroduce local storage pressure over time if not periodically pruned.
 
 ## Technical Debt
 
@@ -94,4 +97,4 @@ _Last updated:_ 2026-07-24
 
 ## Next Milestone
 
-Phase 0 complete.
+Phase 1 kickoff: Document Ingestion foundation.

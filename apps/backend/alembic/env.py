@@ -4,7 +4,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
-from app.models.base import Base
+from app.models import Base  # noqa: F401 - imports Document/AuditLog so they register on Base.metadata
 
 config = context.config
 if config.config_file_name is not None:

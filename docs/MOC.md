@@ -10,6 +10,16 @@
 - [[implementation/High-Level-Implementation-Plan]]
 - [[architecture/Progress]]
 
+## Workstreams
+
+- [[workstreams/README]]
+- [[workstreams/WS-01-Frontend]]
+- [[workstreams/WS-02-Backend-and-Data]]
+- [[workstreams/WS-03-Document-Processing-and-OCR]]
+- [[workstreams/WS-04-Workflow-Orchestration]]
+- [[workstreams/WS-05-Infrastructure-and-DevOps]]
+- [[workstreams/WS-06-Quality-Testing-and-Documentation]]
+
 ## Product Requirements
 
 - [[architecture/templates/PRD-Phase-0-Foundation]]

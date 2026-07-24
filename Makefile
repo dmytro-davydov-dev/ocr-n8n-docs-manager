@@ -1,6 +1,6 @@
 COMPOSE ?= docker compose
 
-.PHONY: up down reset logs verify-phase0 test-backend-auth
+.PHONY: up down reset logs verify-phase0 test-backend-auth test-backend export-openapi verify-openapi
 
 up:
 	$(COMPOSE) up --build
@@ -36,4 +36,25 @@ test-backend-auth:
 		cd apps/backend && python3 -m unittest -v tests/test_internal_api_auth.py; \
 	else \
 		$(COMPOSE) run --rm backend python -m unittest -v tests/test_internal_api_auth.py; \
+	fi
+
+test-backend:
+	@if cd apps/backend && python3 -c "import fastapi" >/dev/null 2>&1; then \
+		cd apps/backend && python3 -m unittest discover -v -s tests; \
+	else \
+		$(COMPOSE) run --rm backend python -m unittest discover -v -s tests; \
+	fi
+
+export-openapi:
+	@if cd apps/backend && python3 -c "import fastapi" >/dev/null 2>&1; then \
+		cd apps/backend && python3 scripts/export_openapi.py; \
+	else \
+		$(COMPOSE) run --rm backend python scripts/export_openapi.py; \
+	fi
+
+verify-openapi:
+	@if cd apps/backend && python3 -c "import fastapi" >/dev/null 2>&1; then \
+		cd apps/backend && python3 scripts/check_openapi_drift.py; \
+	else \
+		$(COMPOSE) run --rm backend python scripts/check_openapi_drift.py; \
 	fi

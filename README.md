@@ -136,6 +136,16 @@ Copy `.env.example` to `.env` and adjust values as needed.
 
 - docs/architecture/Progress.md
 
+### Workstreams
+
+- [Workstreams Overview](docs/workstreams/README.md)
+- [WS-01 Frontend](docs/workstreams/WS-01-Frontend.md)
+- [WS-02 Backend and Data](docs/workstreams/WS-02-Backend-and-Data.md)
+- [WS-03 Document Processing and OCR](docs/workstreams/WS-03-Document-Processing-and-OCR.md)
+- [WS-04 Workflow Orchestration](docs/workstreams/WS-04-Workflow-Orchestration.md)
+- [WS-05 Infrastructure and DevOps](docs/workstreams/WS-05-Infrastructure-and-DevOps.md)
+- [WS-06 Quality, Testing, and Documentation](docs/workstreams/WS-06-Quality-Testing-and-Documentation.md)
+
 ### Product Requirements
 
 - [PRD-Phase-0-Foundation](docs/architecture/templates/PRD-Phase-0-Foundation.md)

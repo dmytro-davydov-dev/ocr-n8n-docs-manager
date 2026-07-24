@@ -1,11 +1,11 @@
 # Progress
 
-_Last updated:_ 2026-07-24 (WS-01 Phase 2 OCR viewer)
+_Last updated:_ 2026-07-24 (WS-02 Phase 1 document ingestion backend)
 
 ## Overall Status
 
-- **Current Phase:** Phase 0 – Foundation
-- **Overall Progress:** 100%
+- **Current Phase:** Phase 1 – Document Ingestion
+- **Overall Progress:** 27%
 - **Project Status:** 🟢 On Track
 
 ---
@@ -15,7 +15,7 @@ _Last updated:_ 2026-07-24 (WS-01 Phase 2 OCR viewer)
 | Phase | Status | Progress | PRD | ADRs |
 |---|---|---:|---|---|
 | Phase 0 – Foundation | ✅ | 100% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
-| Phase 1 – Document Ingestion | ☐ | 0% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
+| Phase 1 – Document Ingestion | 🔶 | 60% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
 | Phase 2 – OCR Pipeline | ☐ | 0% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
 | Phase 3 – AI Extraction | ☐ | 0% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | ☐ | 0% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
@@ -52,6 +52,44 @@ _Last updated:_ 2026-07-24 (WS-01 Phase 2 OCR viewer)
 - Passed `make verify-phase0` acceptance checks (frontend, backend, n8n, postgres, redis, celery).
 - Passed backend internal auth regression tests via `make test-backend-auth`.
 
+- WS-02 Backend: Phase 1 document ingestion. Implemented `Document` and
+  append-only `AuditLog` SQLAlchemy models, a local-filesystem storage
+  service (`/documents` volume, sha256 content hash), and a
+  service/repository layer that enforces legal document-status transitions
+  (`uploaded -> queued -> processing -> complete|failed`) and writes an
+  audit-log entry for every mutation, per ADR-006/ADR-015. Added real
+  `POST/GET /api/documents`, `GET /api/documents/{id}`,
+  `GET /api/documents/{id}/file` endpoints matching the contract WS-01
+  already built its mock against (`DocumentSummary` camelCase JSON), plus
+  an internal `PATCH /api/internal/documents/{id}/status` callback for
+  WS-04 (n8n) to report processing progress — n8n still cannot write to
+  application tables directly. Added Alembic migration `0002` replacing
+  the Phase-0 placeholder schema. Added 11 passing unit tests
+  (`apps/backend/tests/test_documents_api.py`, SQLite-backed,
+  `make test-backend`) and OpenAPI export/drift-check scripts + a
+  `backend` GitHub Actions workflow wired to `make verify-openapi`,
+  addressing the WS-02 Done Criteria's "OpenAPI is generated and
+  versioned; CI detects contract drift" bullet. Pinned `pydantic==2.9.2`
+  and added the previously-missing `python-multipart` dependency (required
+  by FastAPI for file uploads; its absence would have made the upload
+  endpoint 500 at runtime).
+- WS-02 Backend: review state machine (ADR-014), built to close out the
+  WS-02 Done Criteria. Added `Review` (status/version/content) and
+  append-only `ReviewRevision` models plus a migration (`0003`). The
+  status machine enforces every ADR-014 transition explicitly (no boolean
+  `approved` flag): `draft_review -> in_review -> approved|rejected`,
+  `rejected -> draft_review|archived`, `approved -> archived`. Editing is
+  optimistic-locked via a `version` counter (`ReviewVersionConflict` ->
+  HTTP 412) and every edit/transition appends a `ReviewRevision` snapshot
+  (ADR-014: "user edits create a new review version while preserving the
+  original AI output") plus an `audit_log` entry. Approving with empty
+  content and rejecting without a reason are rejected as validation
+  errors (422). Added `POST/GET/PATCH /api/documents/{id}/review`,
+  `POST .../review/{submit,approve,reject,archive}`, and
+  `GET .../review/history` (the Phase-4 audit-history API deliverable).
+  11 new passing tests in `apps/backend/tests/test_reviews_api.py`
+  (22 total across the backend test suite).
+
 ## In Progress
 
 - WS-01 Frontend: Phase 1 upload UI. Added drag-and-drop upload with per-file
@@ -82,7 +120,32 @@ _Last updated:_ 2026-07-24 (WS-01 Phase 2 OCR viewer)
 
 ## Technical Debt
 
-- Add richer initial schema and model coverage once Phase 1 starts.
+- WS-04 has not shipped the n8n upload workflow yet (`n8n/` is empty), so
+  `N8N_WEBHOOK_URL` has no real receiver. Every upload against the real
+  backend currently ends in `status: "failed"` with
+  `errorMessage: "Failed to trigger processing workflow"` rather than
+  advancing to `queued`/`processing`/`complete` — this is intentional
+  (FR-105's trigger step genuinely fails) and will resolve once WS-04
+  delivers the workflow.
+- `apps/frontend/src/mocks/mockDocumentsApi.ts` (gated by
+  `VITE_ENABLE_API_MOCKS`) is still in place; WS-02's real `/documents`
+  endpoints now exist but WS-01 owns the decision of when to retire the
+  mock and point the frontend at them end-to-end.
+- The `Review`/`ReviewRevision` state machine (ADR-014) was implemented
+  ahead of Phase 2/3 (OCR, extraction) to satisfy WS-02's Done Criteria,
+  since those phases don't exist yet. `POST /api/documents/{id}/review`
+  currently takes a caller-supplied `content` payload as a stand-in for
+  real AI-extracted data; once Phase 3 ships, extraction becomes the seed
+  for the initial draft instead (`review_service.start_review`'s docstring
+  flags this). The review API itself (transitions, optimistic locking,
+  append-only revision history, audit log) is real and fully tested, not
+  a placeholder.
+- No frontend consumes the review endpoints yet — WS-01's UI for this is
+  PRD-Phase-4 (Contract Review UI) scope, not started.
+- `packages/api-client/openapi.json` is a generated artifact checked in by
+  `make export-openapi`; the hand-written TS client in
+  `packages/api-client/src/index.ts` is not yet generated _from_ it (still
+  a manually-kept mirror of the same contract).
 
 ## Open Questions
 

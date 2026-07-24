@@ -1,0 +1,32 @@
+name: backend
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "apps/backend/**"
+      - "packages/api-client/openapi.json"
+      - ".github/workflows/backend.yml"
+
+jobs:
+  test-and-verify-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: apps/backend
+        run: pip install -r requirements.txt
+
+      - name: Run backend tests
+        working-directory: apps/backend
+        run: python -m unittest discover -v -s tests
+
+      - name: Verify OpenAPI contract has no drift
+        working-directory: apps/backend
+        run: python scripts/check_openapi_drift.py

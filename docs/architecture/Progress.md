@@ -5,7 +5,7 @@ _Last updated:_ 2026-07-24
 ## Overall Status
 
 - **Current Phase:** Phase 0 – Foundation
-- **Overall Progress:** 40%
+- **Overall Progress:** 60%
 - **Project Status:** 🟡 In Progress
 
 ---
@@ -14,8 +14,8 @@ _Last updated:_ 2026-07-24
 
 | Phase | Status | Progress | PRD | ADRs |
 |---|---|---:|---|---|
-| Phase 0 – Foundation | 🟡 | 40% | ☐ | ☐ |
-| Phase 1 – Upload | ☐ | 0% | ☐ | ☐ |
+| Phase 0 – Foundation | 🟡 | 60% | ☐ | ☐ |
+| Phase 1 – Document Ingestion | ☐ | 0% | ☐ | ☐ |
 | Phase 2 – n8n Orchestration | ☐ | 0% | ☐ | ☐ |
 | Phase 3 – PDF Extraction | ☐ | 0% | ☐ | ☐ |
 | Phase 4 – OCR | ☐ | 0% | ☐ | ☐ |
@@ -45,6 +45,10 @@ _Last updated:_ 2026-07-24
 - Verified backend syntax with `python3 -m compileall apps/backend`.
 - Added backend internal API key checks for internal endpoints (`/api/internal/ping`).
 - Added n8n container health check (`/healthz`) in Compose.
+- Added `make verify-phase0` acceptance-check target for stack health and connectivity checks.
+- Added backend auth regression test (`apps/backend/tests/test_internal_api_auth.py`) and `make test-backend-auth` command.
+- Parameterized PostgreSQL and n8n service configuration via `.env` values in Compose.
+- Documented environment variables in README and expanded `.env.example` coverage.
 
 ## In Progress
 

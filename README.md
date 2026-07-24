@@ -77,6 +77,48 @@ docker compose down
 docker compose down -v
 ```
 
+### Phase 0 Verification
+
+Run these checks after the stack is up:
+
+```bash
+make verify-phase0
+```
+
+### Backend Internal Auth Test
+
+```bash
+make test-backend-auth
+```
+
+### Environment Variables
+
+Copy `.env.example` to `.env` and adjust values as needed.
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| APP_ENV | Backend runtime environment label | development |
+| LOG_LEVEL | Backend and worker log verbosity | INFO |
+| INTERNAL_API_KEY | Header value for internal API routes | change-me |
+| POSTGRES_DB | Main PostgreSQL database name | contracts |
+| POSTGRES_USER | PostgreSQL username | postgres |
+| POSTGRES_PASSWORD | PostgreSQL password | postgres |
+| DATABASE_URL | SQLAlchemy connection string for backend | postgresql+psycopg2://postgres:postgres@postgres:5432/contracts |
+| CELERY_BROKER_URL | Redis broker URL for Celery | redis://redis:6379/0 |
+| CELERY_RESULT_BACKEND | Redis result backend URL for Celery | redis://redis:6379/1 |
+| VITE_API_BASE_URL | Frontend API base URL | <http://localhost:8000/api> |
+| N8N_DB_HOST | n8n PostgreSQL host | postgres |
+| N8N_DB_PORT | n8n PostgreSQL port | 5432 |
+| N8N_DB_NAME | n8n PostgreSQL database name | n8n |
+| N8N_DB_USER | n8n PostgreSQL username | postgres |
+| N8N_DB_PASSWORD | n8n PostgreSQL password | postgres |
+| N8N_HOST | n8n service host | localhost |
+| N8N_PORT | n8n service port | 5678 |
+| N8N_PROTOCOL | n8n protocol | http |
+| N8N_SECURE_COOKIE | n8n secure cookie mode | false |
+| GENERIC_TIMEZONE | n8n timezone | UTC |
+| N8N_ENCRYPTION_KEY | n8n credential encryption key | replace-this-key |
+
 ## Documentation
 
 ### Knowledge Base
@@ -95,14 +137,8 @@ docker compose down -v
 
 ### Product Requirements
 
-- PRD-Phase-0-Foundation.md
-- PRD-Phase-1-Upload.md
-- PRD-Phase-2-Orchestration.md
-- PRD-Phase-3-PDF.md
-- PRD-Phase-4-OCR.md
-- PRD-Phase-5-AI.md
-- PRD-Phase-6-Review.md
-- PRD-Phase-7-Hardening.md
+- docs/architecture/templates/PRD-Phase-0-Foundation.md
+- docs/architecture/templates/PRD-Phase-1-Document-Ingestion.md
 
 ### Architecture Decision Records
 

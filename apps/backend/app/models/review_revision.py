@@ -23,7 +23,7 @@ class ReviewRevision(Base):
         String(length=36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     review_id: Mapped[str] = mapped_column(
-        String(length=36), ForeignKey("reviews.id"), nullable=False
+        String(length=36), ForeignKey("reviews.id"), nullable=False, index=True
     )
     version: Mapped[int] = mapped_column(Integer(), nullable=False)
     status: Mapped[str] = mapped_column(String(length=32), nullable=False)

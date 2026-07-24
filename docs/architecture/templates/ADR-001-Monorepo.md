@@ -1,7 +1,7 @@
 # ADR-001 — Monorepo
 
 - **Status:** Accepted
-- **Date:** YYYY-MM-DD
+- **Date:** 2026-07-24
 - **Decision Makers:** Project Team
 
 ---

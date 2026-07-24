@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated:_ 2026-07-24 (WS-05 infrastructure/DevOps: env-var plumbing fix, celery-worker resource limits, pgvector-enabled Postgres, isolated n8n credentials — WS-05 Done Criteria met)
+_Last updated:_ 2026-07-24 (WS-06 quality/testing/documentation: ADR date fixes, CI migration gate (which caught and fixed real model/migration drift), OCR/extraction regression fixtures, and a cross-workstream ingestion integration test — WS-06 Done Criteria met)
 
 ## Overall Status
 
@@ -244,6 +244,57 @@ _Last updated:_ 2026-07-24 (WS-05 infrastructure/DevOps: env-var plumbing fix, c
   db), and the full 42-test backend suite (`make test-backend`), all
   passing. Updated the README env var table and `.env.example` with the
   newly-plumbed and newly-added variables.
+
+- WS-06 Quality/Testing/Documentation: closed out the WS-06 Done Criteria.
+  Fixed ADR-001 and ADR-002, the only two ADRs still carrying a
+  `YYYY-MM-DD` placeholder `Date` instead of an actual one (every other
+  ADR/PRD already had Status/Date/Related Documents current; `docs/MOC.md`
+  already linked every ADR/PRD/workstream doc, so no changes were needed
+  there). Closed the Done Criteria's "CI blocks merges on... migration
+  errors" gap: `.github/workflows/backend.yml` previously ran tests and an
+  OpenAPI-drift check but never applied a migration, so a broken Alembic
+  migration or a model that had drifted from what the migrations actually
+  create would pass CI silently. Added a `pgvector/pgvector:pg16` service
+  container to the workflow plus `alembic upgrade head` and `alembic check`
+  steps. Running this locally against a real (throwaway) Postgres container
+  before wiring it into CI immediately caught a real bug, not a
+  hypothetical one: six indexes that migrations `0002`-`0006` create with
+  `op.create_index(...)` (`ix_documents_status`, `ix_documents_content_hash`,
+  `ix_audit_log_entity`, `ix_reviews_status`, `ix_review_revisions_review_id`,
+  `ix_ocr_pages_document_id`, `ix_chunks_document_id`) were never declared
+  on the corresponding SQLAlchemy model columns, so `alembic check` flagged
+  them as drift an autogenerate would silently drop. Added the matching
+  `index=True`/`Index(...)` declarations to the `Document`, `AuditLog`,
+  `Review`, `ReviewRevision`, `OcrPage`, and `Chunk` models so the ORM
+  layer matches the schema Alembic actually produces; verified clean with
+  `alembic check` against a fresh Postgres and confirmed the existing
+  42-test suite still passes unchanged. Populated `fixtures/` (previously
+  empty, despite being a named WS-06 deliverable) with an
+  `ocr_extraction/` regression fixture set closing the Phase 2/3 milestones:
+  a synthetic 2-page PDF (`sample_contract.pdf`, fabricated contract text,
+  not a real document) plus checked-in golden `sample_contract.ocr.json`/
+  `sample_contract.extraction.json` files pinning the exact OCR-page and
+  `ExtractedContractFields` output the pipeline should reproduce for it —
+  a prompt/schema-regression baseline per ADR-013, refreshed in the same PR
+  as any OCR engine/LLM/prompt change (`fixtures/README.md`).
+  `apps/backend/tests/test_regression_fixtures.py` (new) replays those
+  golden files through the real `validate_file -> run_ocr -> extract_fields`
+  task chain via fixture-backed fake engine/provider (paddleocr/a real LLM
+  still aren't runnable in this dev shell, see Technical Debt) and asserts
+  the persisted API responses match the fixture exactly. Closed the Phase 1
+  milestone "Ingestion integration tests (upload -> metadata -> workflow
+  trigger)" with `apps/backend/tests/test_ingestion_integration.py` (new):
+  unlike the existing per-task unit tests or `test_internal_processing.py`
+  (which mocks `chain` itself and never runs real task logic), this test
+  drives the actual seam end to end in one run — real `POST /api/documents`
+  upload, asserts the outbound n8n workflow-trigger webhook (WS-04) was
+  called with the right document id, calls the real internal `/process`
+  endpoint (ADR-009), and runs the real `validate_file`/`run_ocr`/
+  `extract_fields`/`generate_embeddings` task chain synchronously (OCR/LLM/
+  embedding providers faked, everything else real) — then asserts the
+  document reaches `complete` with OCR pages, extraction, and chunks all
+  populated and retrievable. Full backend suite: 44 tests passing
+  (`make test-backend`).
 
 ## In Progress
 

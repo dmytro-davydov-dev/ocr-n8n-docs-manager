@@ -1,0 +1,11 @@
+{
+  "parties": ["Acme Corp", "Northwind Traders LLC"],
+  "effective_date": "2026-03-01",
+  "termination_date": "2027-02-28",
+  "monetary_values": ["$5,000.00"],
+  "key_clauses": ["Confidentiality", "Governing Law"],
+  "obligations": [
+    "Client shall pay Provider a monthly fee of $5,000.00, due on the first business day of each month.",
+    "Provider shall deliver monthly status reports and Client shall provide timely access to information reasonably required for Provider to perform the services."
+  ]
+}

@@ -20,9 +20,9 @@ class Document(Base):
     filename: Mapped[str] = mapped_column(String(length=255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(length=128), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger(), nullable=False)
-    content_hash: Mapped[str] = mapped_column(String(length=64), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(length=64), nullable=False, index=True)
     storage_path: Mapped[str] = mapped_column(String(length=1024), nullable=False)
-    status: Mapped[str] = mapped_column(String(length=32), nullable=False, default="uploaded")
+    status: Mapped[str] = mapped_column(String(length=32), nullable=False, default="uploaded", index=True)
     error_message: Mapped[str | None] = mapped_column(String(length=2048), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(

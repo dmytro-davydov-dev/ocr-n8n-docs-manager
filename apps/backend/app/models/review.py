@@ -29,7 +29,9 @@ class Review(Base):
     document_id: Mapped[str] = mapped_column(
         String(length=36), ForeignKey("documents.id"), nullable=False, unique=True
     )
-    status: Mapped[str] = mapped_column(String(length=32), nullable=False, default="draft_review")
+    status: Mapped[str] = mapped_column(
+        String(length=32), nullable=False, default="draft_review", index=True
+    )
     # Optimistic-lock counter (ADR-014 Risks: concurrent editing). Bumped on
     # every content or status change.
     version: Mapped[int] = mapped_column(Integer(), nullable=False, default=1)

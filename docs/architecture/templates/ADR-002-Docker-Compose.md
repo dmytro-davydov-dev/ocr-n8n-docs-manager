@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Version:** 1.0  
-**Date:** YYYY-MM-DD  
+**Date:** 2026-07-24  
 **Owner:** Engineering
 
 ---

@@ -1,0 +1,14 @@
+{
+  "pages": [
+    {
+      "page_number": 1,
+      "extracted_text": "MASTER SERVICES AGREEMENT\nThis Master Services Agreement (\"Agreement\") is entered into as of\nMarch 1, 2026 (the \"Effective Date\") by and between Acme Corp, a\nDelaware corporation (\"Client\"), and Northwind Traders LLC, a\nCalifornia limited liability company (\"Provider\").\n1. Term. This Agreement shall remain in effect until February 28,\n2027 (the \"Termination Date\"), unless earlier terminated as\nprovided herein.\n2. Fees. Client shall pay Provider a monthly fee of $5,000.00,\ndue on the first business day of each month.\n",
+      "confidence_score": 0.97
+    },
+    {
+      "page_number": 2,
+      "extracted_text": "3. Confidentiality. Each party shall keep confidential all\nnon-public information disclosed by the other party and shall\nnot use such information except to perform its obligations\nunder this Agreement.\n4. Obligations. Provider shall deliver monthly status reports\nand Client shall provide timely access to information reasonably\nrequired for Provider to perform the services.\n5. Governing Law. This Agreement is governed by the laws of the\nState of Delaware.\nThis is a synthetic fixture document created for automated testing\npurposes only. It does not represent a real agreement.\n",
+      "confidence_score": 0.97
+    }
+  ]
+}

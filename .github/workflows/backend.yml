@@ -12,6 +12,20 @@ on:
 jobs:
   test-and-verify-contract:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: contracts
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -30,3 +44,15 @@ jobs:
       - name: Verify OpenAPI contract has no drift
         working-directory: apps/backend
         run: python scripts/check_openapi_drift.py
+
+      - name: Apply Alembic migrations against a clean database
+        working-directory: apps/backend
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/contracts
+        run: alembic upgrade head
+
+      - name: Verify models have no un-migrated schema drift
+        working-directory: apps/backend
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/contracts
+        run: alembic check

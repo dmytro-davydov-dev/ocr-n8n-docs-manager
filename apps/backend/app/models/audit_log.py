@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, String, func
+from sqlalchemy import JSON, DateTime, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,6 +16,7 @@ class AuditLog(Base):
     """Append-only record of every mutation, per ADR-015. Never updated or deleted."""
 
     __tablename__ = "audit_log"
+    __table_args__ = (Index("ix_audit_log_entity", "entity_type", "entity_id"),)
 
     # Text UUID (not the postgres-only UUID type) so the schema also works
     # against SQLite in unit tests.

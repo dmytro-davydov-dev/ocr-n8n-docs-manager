@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link as RouterLink } from "react-router-dom";
 import type { DocumentStatus } from "@contract-review/api-client";
 import {
   Alert,
@@ -78,16 +79,25 @@ export function DocumentList() {
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map((doc) => (
-            <TableRow key={doc.id} hover>
-              <TableCell>{doc.filename}</TableCell>
-              <TableCell>{formatSize(doc.sizeBytes)}</TableCell>
-              <TableCell>
-                <Chip size="small" label={STATUS_LABEL[doc.status]} color={STATUS_COLOR[doc.status]} />
-              </TableCell>
-              <TableCell>{new Date(doc.updatedAt).toLocaleTimeString()}</TableCell>
-            </TableRow>
-          ))}
+          {data.map((doc) => {
+            const isViewable = doc.status === "complete";
+            return (
+              <TableRow
+                key={doc.id}
+                hover={isViewable}
+                {...(isViewable
+                  ? { component: RouterLink, to: `/documents/${doc.id}`, sx: { cursor: "pointer", textDecoration: "none" } }
+                  : {})}
+              >
+                <TableCell>{doc.filename}</TableCell>
+                <TableCell>{formatSize(doc.sizeBytes)}</TableCell>
+                <TableCell>
+                  <Chip size="small" label={STATUS_LABEL[doc.status]} color={STATUS_COLOR[doc.status]} />
+                </TableCell>
+                <TableCell>{new Date(doc.updatedAt).toLocaleTimeString()}</TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </TableContainer>

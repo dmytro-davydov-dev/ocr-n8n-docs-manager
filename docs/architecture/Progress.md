@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated:_ 2026-07-24
+_Last updated:_ 2026-07-24 (WS-01 Phase 2 OCR viewer)
 
 ## Overall Status
 
@@ -63,6 +63,14 @@ _Last updated:_ 2026-07-24
 - Repo hygiene: removed stray build artifacts (`tsconfig.tsbuildinfo`,
   `vite.config.ts.timestamp-*.mjs`) that were accidentally committed with the
   Phase 1 frontend work, and added `.gitignore` rules so they don't recur.
+- WS-01 Frontend: Phase 2 OCR viewer. Added `OcrPage` type and
+  `getOcrPages`/`getDocumentFile` methods to `packages/api-client` per
+  ADR-011's page-level record shape. Added `/documents/:id` detail route with
+  a PDF viewer (object-URL iframe) synced to a per-page OCR text panel with
+  color-coded confidence chips. Extended the dev-only mock to store uploaded
+  file blobs and generate placeholder OCR pages once a document reaches
+  `complete`, since WS-02/WS-03 haven't shipped the real OCR pipeline yet.
+  Verified with `tsc -b` and `vite build`.
 
 ## Blockers
 

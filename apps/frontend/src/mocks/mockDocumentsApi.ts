@@ -1,14 +1,15 @@
-import type { DocumentStatus, DocumentSummary } from "@contract-review/api-client";
+import type { DocumentStatus, DocumentSummary, OcrPage } from "@contract-review/api-client";
 
 /**
- * Dev-only mock for the document ingestion API (PRD-Phase-1-Document-Ingestion).
+ * Dev-only mock for the document ingestion + OCR API (PRD-Phase-1-Document-
+ * Ingestion, PRD-Phase-2-OCR-Pipeline).
  *
- * WS-02 (Backend & Data) has not yet shipped the `/documents` endpoints for
- * Phase 1. Per WS-01's dependency note, a mocked contract is sufficient to
- * unblock frontend work: this module intercepts `fetch` (list/get) and
+ * WS-02 (Backend & Data) has not yet shipped the `/documents` endpoints.
+ * Per WS-01's dependency note, a mocked contract is sufficient to unblock
+ * frontend work: this module intercepts `fetch` (list/get/ocr/file) and
  * `XMLHttpRequest` (upload, for progress events) so the UI can be built and
- * demoed against a realistic lifecycle. Remove this file once WS-02 delivers
- * the real endpoints and point `VITE_API_BASE_URL` at them.
+ * demoed against a realistic lifecycle. Remove this file once WS-02
+ * delivers the real endpoints and point `VITE_API_BASE_URL` at them.
  */
 
 const DOCUMENTS_PATH = "/documents";
@@ -16,6 +17,8 @@ const LIFECYCLE: DocumentStatus[] = ["uploaded", "queued", "processing", "comple
 
 let store: DocumentSummary[] = [];
 let idCounter = 0;
+const fileBlobs = new Map<string, Blob>();
+const ocrResults = new Map<string, OcrPage[]>();
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -23,6 +26,32 @@ function nowIso(): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Rough page-count guess from file size, purely for a plausible-looking demo. */
+function estimatePageCount(sizeBytes: number): number {
+  return Math.min(6, Math.max(1, Math.round(sizeBytes / 50_000)));
+}
+
+function generateOcrPages(doc: DocumentSummary): OcrPage[] {
+  const pageCount = estimatePageCount(doc.sizeBytes);
+  return Array.from({ length: pageCount }, (_, index) => {
+    const pageNumber = index + 1;
+    // Vary confidence so the UI can demo high/medium/low indicators.
+    const confidenceScore = pageNumber === 2 ? 0.68 : Math.round((0.9 + Math.random() * 0.09) * 100) / 100;
+    return {
+      documentId: doc.id,
+      pageNumber,
+      extractedText:
+        `[Mock OCR output for "${doc.filename}", page ${pageNumber} of ${pageCount}]\n\n` +
+        "This is placeholder extracted text standing in for WS-03's OCR pipeline output " +
+        "(PRD-Phase-2-OCR-Pipeline). Once the real OCR service is wired up via n8n/Celery, " +
+        "this text will reflect the actual scanned content of the document.",
+      confidenceScore,
+      processingTimestamp: nowIso(),
+      ocrEngineVersion: "mock-ocr-0.1.0",
+    };
+  });
 }
 
 function advanceLifecycle(id: string): void {
@@ -33,7 +62,10 @@ function advanceLifecycle(id: string): void {
     if (idx === -1 || idx >= LIFECYCLE.length - 1) return;
     doc.status = LIFECYCLE[idx + 1];
     doc.updatedAt = nowIso();
-    if (doc.status !== "complete") {
+
+    if (doc.status === "complete") {
+      ocrResults.set(doc.id, generateOcrPages(doc));
+    } else {
       setTimeout(step, 1500 + Math.random() * 1500);
     }
   };
@@ -125,6 +157,9 @@ function handleMockUpload(xhr: MockCapableXHR, formData: FormData): void {
         updatedAt: nowIso(),
       };
       store = [doc, ...store];
+      if (file) {
+        fileBlobs.set(doc.id, file);
+      }
       advanceLifecycle(doc.id);
 
       xhr.status = 201;
@@ -137,7 +172,9 @@ function handleMockUpload(xhr: MockCapableXHR, formData: FormData): void {
 export function installDocumentMocks(baseUrl: string): void {
   const realFetch = window.fetch.bind(window);
   const listUrl = `${baseUrl}${DOCUMENTS_PATH}`;
-  const singleUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/(.+)$`);
+  const ocrUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)/ocr$`);
+  const fileUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)/file$`);
+  const singleUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)$`);
 
   window.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -145,6 +182,19 @@ export function installDocumentMocks(baseUrl: string): void {
     if (url === listUrl && (!init?.method || init.method === "GET")) {
       const sorted = [...store].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       return jsonResponse(sorted);
+    }
+
+    const ocrMatch = url.match(ocrUrlPattern);
+    if (ocrMatch) {
+      return jsonResponse(ocrResults.get(ocrMatch[1]) ?? []);
+    }
+
+    const fileMatch = url.match(fileUrlPattern);
+    if (fileMatch) {
+      const blob = fileBlobs.get(fileMatch[1]);
+      return blob
+        ? new Response(blob, { status: 200, headers: { "Content-Type": "application/pdf" } })
+        : jsonResponse({ message: "File not found" }, 404);
     }
 
     const singleMatch = url.match(singleUrlPattern);

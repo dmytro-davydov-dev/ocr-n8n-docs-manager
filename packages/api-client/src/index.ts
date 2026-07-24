@@ -19,6 +19,18 @@ export interface DocumentSummary {
 
 export type UploadProgressHandler = (percent: number) => void;
 
+/**
+ * Page-level OCR result per ADR-011-OCR-Storage-Strategy.
+ */
+export interface OcrPage {
+  documentId: string;
+  pageNumber: number;
+  extractedText: string;
+  confidenceScore: number;
+  processingTimestamp: string;
+  ocrEngineVersion: string;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -99,5 +111,29 @@ export class ApiClient {
       formData.append("file", file, file.name);
       xhr.send(formData);
     });
+  }
+
+  /**
+   * FR-207: fetch page-level OCR output for a document.
+   */
+  async getOcrPages(documentId: string): Promise<OcrPage[]> {
+    const response = await fetch(`${this.baseUrl}/documents/${documentId}/ocr`);
+    if (!response.ok) {
+      throw new ApiError(`Failed to fetch OCR pages for ${documentId}: ${response.status}`, response.status);
+    }
+
+    return (await response.json()) as OcrPage[];
+  }
+
+  /**
+   * Fetch the original document file for viewing alongside its OCR text.
+   */
+  async getDocumentFile(documentId: string): Promise<Blob> {
+    const response = await fetch(`${this.baseUrl}/documents/${documentId}/file`);
+    if (!response.ok) {
+      throw new ApiError(`Failed to fetch file for ${documentId}: ${response.status}`, response.status);
+    }
+
+    return await response.blob();
   }
 }

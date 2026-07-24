@@ -107,6 +107,7 @@ Copy `.env.example` to `.env` and adjust values as needed.
 | CELERY_BROKER_URL | Redis broker URL for Celery | redis://redis:6379/0 |
 | CELERY_RESULT_BACKEND | Redis result backend URL for Celery | redis://redis:6379/1 |
 | VITE_API_BASE_URL | Frontend API base URL | <http://localhost:8000/api> |
+| VITE_ENABLE_API_MOCKS | Dev-only mock of WS-02's `/documents` endpoints (Phase 1) until they ship; set to `false` once real endpoints exist | true |
 | N8N_DB_HOST | n8n PostgreSQL host | postgres |
 | N8N_DB_PORT | n8n PostgreSQL port | 5432 |
 | N8N_DB_NAME | n8n PostgreSQL database name | n8n |

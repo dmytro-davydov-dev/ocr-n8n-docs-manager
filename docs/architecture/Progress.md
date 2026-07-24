@@ -54,7 +54,12 @@ _Last updated:_ 2026-07-24
 
 ## In Progress
 
-- None.
+- WS-01 Frontend: Phase 1 upload UI. Added drag-and-drop upload with per-file
+  progress, a live-polling document list, and `/documents` types/methods in
+  `packages/api-client` (list/get/upload), per PRD-Phase-1 FR-101–108.
+  WS-02 hasn't implemented the `/documents` endpoints yet, so a dev-only mock
+  (`apps/frontend/src/mocks/mockDocumentsApi.ts`, gated by
+  `VITE_ENABLE_API_MOCKS`) stands in for the contract in the interim.
 
 ## Blockers
 

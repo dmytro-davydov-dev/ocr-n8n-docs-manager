@@ -32,11 +32,11 @@ function renderApp() {
   );
 }
 
-// WS-02's `/documents` endpoints (PRD-Phase-1) don't exist yet. Until they
-// ship, a dev-only mock stands in for the contract so the UI can be built
-// and demoed. Toggle off via VITE_ENABLE_API_MOCKS=false once real
-// endpoints are available.
-const mocksEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_API_MOCKS !== "false";
+// Dev-only mock of the backend's document/review contract, for building or
+// demoing the frontend without a running backend. The real endpoints have
+// existed since WS-02/WS-03 and are used by default; opt into the mock
+// with VITE_ENABLE_API_MOCKS=true.
+const mocksEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_API_MOCKS === "true";
 
 if (mocksEnabled) {
   const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";

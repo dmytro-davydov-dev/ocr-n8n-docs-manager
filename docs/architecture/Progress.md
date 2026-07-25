@@ -15,7 +15,7 @@ _Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with cit
 | Phase | Status | Progress | PRD | ADRs |
 |---|---|---:|---|---|
 | Phase 0 – Foundation | ✅ | 100% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
-| Phase 1 – Document Ingestion | 🔶 | 80% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
+| Phase 1 – Document Ingestion | 🔶 | 85% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
 | Phase 2 – OCR Pipeline | 🔶 | 80% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
 | Phase 3 – AI Extraction | 🔶 | 75% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | 🔶 | 60% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
@@ -388,6 +388,37 @@ _Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with cit
   block and `.env.example` (WS-05's established practice, avoiding the
   exact "documented but not forwarded" bug WS-05 fixed previously).
 
+- WS-01 technical debt: retired the frontend mock as the default. Found a
+  real, previously-undiscovered bug while doing it: `docker-compose.yml`'s
+  `frontend` service never forwarded `VITE_ENABLE_API_MOCKS` into the
+  container at all, so the `.env` setting had zero effect on the actual
+  dev-stack frontend -- it was unconditionally `undefined` inside the
+  container, and `mocksEnabled` (`apps/frontend/src/main.tsx`) treated
+  anything other than the literal string `"false"` as "mocks on", so the
+  containerized frontend was always running against the mock API
+  regardless of `.env`, even though WS-02/WS-03 have shipped real
+  `/documents`, `/ocr`, `/extraction`, `/review`, `/chunks` endpoints since
+  earlier this project. Fixed by forwarding `VITE_ENABLE_API_MOCKS` in
+  `docker-compose.yml`, flipping the default to `false` in `.env`/
+  `.env.example` (now opt-in for a frontend-only demo, not opt-out from a
+  real backend), and inverting `main.tsx`'s check to match (`=== "true"`
+  rather than `!== "false"`, so a missing/misconfigured env var fails safe
+  toward the real backend instead of silently toward the mock). Verified
+  `tsc -b` clean, rebuilt/recreated the `frontend` container on the live
+  dev stack, and confirmed via the served dev-server module
+  (`curl http://localhost:5173/src/main.tsx`) that `VITE_ENABLE_API_MOCKS`
+  now actually reaches the browser as `"false"`. Exercised the real
+  backend directly with `curl` (`POST /api/documents`, `GET /api/documents`)
+  to confirm the endpoints the frontend now talks to work end-to-end;
+  uploads currently land as `status: "failed"` /
+  `"Failed to trigger processing workflow"` -- this is the pre-existing,
+  already-documented n8n `Internal API Key` credential gap (WS-04 Technical
+  Debt), not a regression from this change. Could not visually
+  click-through in an actual browser: the Chrome extension used for
+  browser automation was not connected this session (same limitation
+  noted in every prior WS-01 entry) -- this change is verified at the
+  network/build level, not with a real screenshot.
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone
@@ -505,10 +536,11 @@ _Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with cit
   ends in `status: "failed"` with
   `errorMessage: "Failed to trigger processing workflow"`, same symptom as
   before WS-04 shipped anything -- don't mistake it for a regression.
-- `apps/frontend/src/mocks/mockDocumentsApi.ts` (gated by
-  `VITE_ENABLE_API_MOCKS`) is still in place; WS-02's real `/documents`
-  endpoints now exist but WS-01 owns the decision of when to retire the
-  mock and point the frontend at them end-to-end.
+- ~~`apps/frontend/src/mocks/mockDocumentsApi.ts` is still in place, mock
+  vs. real backend undecided~~ Resolved: `VITE_ENABLE_API_MOCKS` now
+  defaults to `false` (real backend) and is actually forwarded into the
+  `frontend` container (see Completed, below -- it previously wasn't). The
+  mock module itself is kept, opt-in, for frontend-only demos.
 - The `Review`/`ReviewRevision` state machine (ADR-014) was implemented
   ahead of Phase 2/3 (OCR, extraction) to satisfy WS-02's Done Criteria.
   `POST /api/documents/{id}/review` still takes a caller-supplied `content`

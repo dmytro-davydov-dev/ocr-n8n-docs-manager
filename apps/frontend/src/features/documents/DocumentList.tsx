@@ -80,7 +80,10 @@ export function DocumentList() {
         </TableHead>
         <TableBody>
           {data.map((doc) => {
-            const isViewable = doc.status === "complete";
+            // "failed" is viewable too -- DocumentDetailPage shows the
+            // errorMessage for it. Without this, a failed document has no
+            // way to be reached from the list at all.
+            const isViewable = doc.status === "complete" || doc.status === "failed";
             return (
               <TableRow
                 key={doc.id}

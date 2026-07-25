@@ -18,7 +18,7 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
 | Phase 1 – Document Ingestion | 🔶 | 85% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
 | Phase 2 – OCR Pipeline | 🔶 | 80% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
 | Phase 3 – AI Extraction | 🔶 | 80% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
-| Phase 4 – Contract Review UI | 🔶 | 60% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
+| Phase 4 – Contract Review UI | 🔶 | 65% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
 | Phase 5 – Search & RAG | 🔶 | 75% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
 ---
@@ -451,6 +451,30 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
   and needs a one-time manual reactivation in the n8n UI -- confirmed by
   hitting the webhook post-import and getting n8n's own "workflow must be
   active" 404, not a crash or malformed-workflow error.
+
+- Phase 4: found and fixed two real bugs in `ReviewPanel.tsx`
+  (`apps/frontend/src/features/documents/ReviewPanel.tsx`) by tracing the
+  code against `packages/api-client`'s actual contract, since the Chrome
+  extension wasn't available to find them by clicking through. (1)
+  `api.getReview` returns `null` specifically on 404 (no review yet) and
+  throws `ApiError` for any other failure (`packages/api-client/src/
+  index.ts`), but the panel never checked `reviewQuery.isError` -- a real
+  fetch failure (500, network error) would silently render "No review has
+  been started for this document yet" with a "Start review" button, same
+  as the expected no-review-yet case, hiding the actual error and inviting
+  the user to create a duplicate review. Now shows an explicit error Alert
+  and suppresses the "Start review" prompt when the query itself failed.
+  (2) React Query leaves a mutation's `isError` set until it's retried or
+  reset; `pendingMutation` picked the first mutation (of 7) matching
+  `isPending || isError` in a fixed array order, so once e.g. a save-draft
+  failed once, that stale error banner would keep shadowing every later,
+  unrelated, even successful action (submit, approve, ...) for the rest of
+  the session -- there was no way to dismiss it short of navigating away.
+  Added `runMutation()`, which resets every sibling mutation before firing
+  the one the user just triggered, and routed all 9 button handlers through
+  it. Verified with `tsc -b` and `vite build` (both clean); still could not
+  click-through in an actual browser (Chrome extension not connected this
+  session either — confirmed via `tabs_context_mcp`).
 
 ## In Progress
 

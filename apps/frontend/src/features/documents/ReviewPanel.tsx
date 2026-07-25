@@ -202,7 +202,7 @@ export function ReviewPanel({
     onError: invalidateReview,
   });
 
-  const pendingMutation = [
+  const allMutations = [
     startMutation,
     saveDraftMutation,
     submitMutation,
@@ -210,7 +210,20 @@ export function ReviewPanel({
     rejectMutation,
     reviseMutation,
     archiveMutation,
-  ].find((mutation) => mutation.isPending || mutation.isError);
+  ];
+
+  // React Query leaves a mutation's `isError` set until it's retried or
+  // explicitly reset, so without this a failed action (e.g. a stale save
+  // draft) would keep shadowing the error/pending banner for every later,
+  // unrelated action (e.g. a successful submit) -- reset every sibling
+  // before starting a new one so the banner always reflects the action the
+  // user just took.
+  const runMutation = (mutation: (typeof allMutations)[number]) => {
+    allMutations.forEach((m) => m !== mutation && m.reset());
+    mutation.mutate();
+  };
+
+  const pendingMutation = allMutations.find((mutation) => mutation.isPending || mutation.isError);
 
   return (
     <Paper variant="outlined" sx={{ mt: 2, p: 2 }}>
@@ -221,6 +234,12 @@ export function ReviewPanel({
       <Divider sx={{ my: 1.5 }} />
 
       {reviewQuery.isLoading && <CircularProgress size={20} />}
+
+      {reviewQuery.isError && (
+        <Alert severity="error" sx={{ mb: 1.5 }}>
+          {errorMessage(reviewQuery.error, "Failed to load this document's review.")}
+        </Alert>
+      )}
 
       {pendingMutation?.isError && (
         <Alert
@@ -234,12 +253,12 @@ export function ReviewPanel({
         </Alert>
       )}
 
-      {!reviewQuery.isLoading && !review && (
+      {!reviewQuery.isLoading && !reviewQuery.isError && !review && (
         <Stack spacing={1} alignItems="flex-start">
           <Typography variant="body2" color="text.secondary">
             No review has been started for this document yet.
           </Typography>
-          <Button variant="contained" size="small" onClick={() => startMutation.mutate()} disabled={startMutation.isPending}>
+          <Button variant="contained" size="small" onClick={() => runMutation(startMutation)} disabled={startMutation.isPending}>
             Start review
           </Button>
         </Stack>
@@ -305,13 +324,13 @@ export function ReviewPanel({
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             {review.status === "draft_review" && (
               <>
-                <Button size="small" variant="outlined" onClick={() => saveDraftMutation.mutate()} disabled={saveDraftMutation.isPending}>
+                <Button size="small" variant="outlined" onClick={() => runMutation(saveDraftMutation)} disabled={saveDraftMutation.isPending}>
                   Save draft
                 </Button>
-                <Button size="small" variant="contained" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>
+                <Button size="small" variant="contained" onClick={() => runMutation(submitMutation)} disabled={submitMutation.isPending}>
                   Submit for review
                 </Button>
-                <Button size="small" color="inherit" onClick={() => archiveMutation.mutate()} disabled={archiveMutation.isPending}>
+                <Button size="small" color="inherit" onClick={() => runMutation(archiveMutation)} disabled={archiveMutation.isPending}>
                   Archive
                 </Button>
               </>
@@ -319,7 +338,7 @@ export function ReviewPanel({
 
             {review.status === "in_review" && (
               <>
-                <Button size="small" variant="contained" color="success" onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending}>
+                <Button size="small" variant="contained" color="success" onClick={() => runMutation(approveMutation)} disabled={approveMutation.isPending}>
                   Approve
                 </Button>
                 <Button size="small" variant="outlined" color="error" onClick={() => setRejectDialogOpen(true)}>
@@ -330,17 +349,17 @@ export function ReviewPanel({
 
             {review.status === "rejected" && (
               <>
-                <Button size="small" variant="contained" onClick={() => reviseMutation.mutate()} disabled={reviseMutation.isPending}>
+                <Button size="small" variant="contained" onClick={() => runMutation(reviseMutation)} disabled={reviseMutation.isPending}>
                   Revise (back to draft)
                 </Button>
-                <Button size="small" color="inherit" onClick={() => archiveMutation.mutate()} disabled={archiveMutation.isPending}>
+                <Button size="small" color="inherit" onClick={() => runMutation(archiveMutation)} disabled={archiveMutation.isPending}>
                   Archive
                 </Button>
               </>
             )}
 
             {review.status === "approved" && (
-              <Button size="small" color="inherit" onClick={() => archiveMutation.mutate()} disabled={archiveMutation.isPending}>
+              <Button size="small" color="inherit" onClick={() => runMutation(archiveMutation)} disabled={archiveMutation.isPending}>
                 Archive
               </Button>
             )}
@@ -376,7 +395,7 @@ export function ReviewPanel({
             variant="contained"
             color="error"
             disabled={rejectReason.trim().length === 0 || rejectMutation.isPending}
-            onClick={() => rejectMutation.mutate()}
+            onClick={() => runMutation(rejectMutation)}
           >
             Reject
           </Button>

@@ -17,9 +17,9 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
 | Phase 0 – Foundation | ✅ | 100% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
 | Phase 1 – Document Ingestion | 🔶 | 85% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
 | Phase 2 – OCR Pipeline | 🔶 | 80% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
-| Phase 3 – AI Extraction | 🔶 | 75% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
+| Phase 3 – AI Extraction | 🔶 | 80% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | 🔶 | 60% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
-| Phase 5 – Search & RAG | 🔶 | 65% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
+| Phase 5 – Search & RAG | 🔶 | 70% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
 ---
 
@@ -419,6 +419,18 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
   noted in every prior WS-01 entry) -- this change is verified at the
   network/build level, not with a real screenshot.
 
+- Phase 3/5 live verification: exercised the real `OpenAiCompatibleLlmProvider`/
+  `OpenAiCompatibleEmbeddingProvider` HTTP code paths and the new Phase 5
+  Search/Chat APIs end-to-end against the live docker stack, using a
+  throwaway local stub standing in for an OpenAI-compatible endpoint (no
+  real LLM/embedding account available in this environment). Confirmed
+  `extract_fields`/`generate_embeddings` correctly call, parse, and persist
+  real HTTP responses (not just fakes), and that an approved review's
+  chunks are correctly retrievable via `GET /api/search` and
+  `POST /api/chat` with accurate citations. See Technical Debt for what
+  this does and doesn't cover, and how the environment was reverted
+  afterward.
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone
@@ -605,14 +617,30 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
      entirely on an x86_64 host). Next step for whoever picks this up:
      reproduce on x86_64, or try a newer `paddlepaddle` release with
      official aarch64 wheels.
-- `documents.extract_fields` and `documents.generate_embeddings` are
-  implemented and unit-tested with fake providers, but neither has been run
-  against a real OpenAI-compatible endpoint — `LLM_BASE_URL`/
-  `EMBEDDING_BASE_URL` are unset by default (see `.env.example`), so both
-  tasks currently return `"provider_unavailable"` and leave the document's
-  `extractions`/`chunks` rows untouched until an operator points them at a
-  real or self-hosted (e.g. Ollama) endpoint. This is the same
-  fail-fast-over-silent-fallback posture as `OCR_ENGINE`.
+- ~~`documents.extract_fields`/`generate_embeddings` have never been run
+  against a real OpenAI-compatible endpoint~~ Partially resolved: verified
+  `OpenAiCompatibleLlmProvider`/`OpenAiCompatibleEmbeddingProvider`'s actual
+  HTTP request/response handling against a throwaway local stub server
+  (session scratchpad only, not committed) implementing the
+  `/chat/completions` and `/embeddings` shapes those providers expect.
+  Temporarily pointed the live `celery-worker`/`backend` containers'
+  `LLM_BASE_URL`/`EMBEDDING_BASE_URL` at it (`OCR_ENGINE=null` too, since
+  paddleocr is blocked -- see above), drove a document through
+  `extract_fields` via `/reprocess` and `generate_embeddings` via the new
+  `/reindex` (manually seeding one `OcrPage` row through the celery-worker
+  container's own DB session, since `OCR_ENGINE=null` produces no text to
+  chunk) -- both completed successfully over real HTTP, persisting a real
+  `extractions` row (`modelProvider: "openai_compatible"`) and a real
+  `chunks` row (`embeddingProvider: "openai_compatible"`), and were then
+  exercised through the new Phase 5 Search/Chat APIs end-to-end (approved
+  the review, `GET /api/search` and `POST /api/chat` both returned correct,
+  citation-backed results against this live data). Reverted `.env` and
+  recreated the containers afterward to restore the documented
+  fail-fast-without-real-credentials behavior -- this was a one-off
+  verification, not a standing change. What this does *not* cover: a real
+  OpenAI (or Ollama) account was never used, so response *quality*
+  (extraction accuracy, embedding semantic relevance) is still unverified
+  — only the transport/parsing code path is now confirmed correct.
 - `chunks.embedding` is stored as a JSON float array, not a native
   `pgvector` column, even though ADR-016 selects pgvector. WS-05 now
   provisions the `vector` extension (`postgres` runs

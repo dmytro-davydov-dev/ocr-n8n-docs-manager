@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas.search import ChatCitationOut, ChatRequest, ChatResponseOut, SearchResultOut
 from app.services import rag_service, search_service
+from app.services.embedding_provider import EmbeddingProviderUnavailable
+from app.services.llm_provider import LlmProviderUnavailable
 
 router = APIRouter(tags=["search"])
 
@@ -15,7 +17,11 @@ def search(
     db: Session = Depends(get_db),
 ) -> list[SearchResultOut]:
     """FR-503/504/505: hybrid keyword + semantic search over approved contracts."""
-    hits = search_service.hybrid_search(db, query=q, limit=limit)
+    try:
+        hits = search_service.hybrid_search(db, query=q, limit=limit)
+    except EmbeddingProviderUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
     return [
         SearchResultOut(
             document_id=hit.chunk.document_id,
@@ -37,6 +43,8 @@ def chat(body: ChatRequest, db: Session = Depends(get_db)) -> ChatResponseOut:
         result = rag_service.answer_question(db, question=body.question)
     except rag_service.NoIndexedContent as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (EmbeddingProviderUnavailable, LlmProviderUnavailable) as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     return ChatResponseOut(
         answer=result.answer,

@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="text-embedding-3-small", alias="EMBEDDING_MODEL")
     embedding_timeout_seconds: float = Field(default=30.0, alias="EMBEDDING_TIMEOUT_SECONDS")
     embedding_max_retries: int = Field(default=3, alias="EMBEDDING_MAX_RETRIES")
+    # ADR-016: native pgvector column dimension. Must match whatever
+    # `embedding_model` actually produces (1536 for text-embedding-3-small,
+    # the default) -- pgvector enforces this at the database level, so a
+    # provider/model change that alters the output dimension requires a
+    # matching migration, not just an env var change.
+    embedding_dimensions: int = Field(default=1536, alias="EMBEDDING_DIMENSIONS")
 
     # ADR-018: configurable chunk token limit/overlap. Token count is
     # approximated by whitespace splitting to avoid pulling in a

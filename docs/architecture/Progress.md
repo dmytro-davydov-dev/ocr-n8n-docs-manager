@@ -19,7 +19,7 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
 | Phase 2 – OCR Pipeline | 🔶 | 80% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
 | Phase 3 – AI Extraction | 🔶 | 80% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | 🔶 | 65% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
-| Phase 5 – Search & RAG | 🔶 | 75% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
+| Phase 5 – Search & RAG | 🔶 | 85% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
 ---
 
@@ -701,17 +701,46 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
   OpenAI (or Ollama) account was never used, so response *quality*
   (extraction accuracy, embedding semantic relevance) is still unverified
   — only the transport/parsing code path is now confirmed correct.
-- `chunks.embedding` is stored as a JSON float array, not a native
-  `pgvector` column, even though ADR-016 selects pgvector. WS-05 now
-  provisions the `vector` extension (`postgres` runs
-  `pgvector/pgvector:pg16`, verified with a real `vector(3)`/`hnsw` probe —
-  see WS-05 entry above under Completed), so this is no longer blocked on
-  infra. A JSON column still keeps the model portable to the SQLite test
-  database this suite runs against, so swapping in a real `Vector` column
-  (and an ANN index, plus a decision on whether to keep SQLite-compatible
-  tests or move them onto Postgres) is a WS-02/WS-03 follow-up migration,
-  not further WS-05 work — Phase 5's actual search/retrieval API (out of
-  WS-03's scope regardless, see PRD-5) will need it.
+- ~~`chunks.embedding` is stored as a JSON float array, not a native
+  `pgvector` column~~ Resolved. `Chunk.embedding` is now
+  `JSON().with_variant(Vector(settings.embedding_dimensions), "postgresql")`
+  (`app/models/chunk.py`) — a real `vector(1536)` column on Postgres,
+  JSON on SQLite (keeping the existing test suite unchanged; SQLite has no
+  vector type). This was verified as behaviorally transparent *before*
+  touching the schema, not assumed: read `pgvector`'s own source
+  (`Vector._from_db`/`_to_db` in the installed package) and confirmed both
+  directions operate on plain `list[float]`, never a numpy array, so every
+  existing caller (`search_service._cosine_similarity`,
+  `chunk_repository.upsert_chunk`, the embedding task) needed no changes.
+  Migration `0007_chunks_pgvector` (`CREATE EXTENSION IF NOT EXISTS
+  vector`, then `ALTER COLUMN ... USING (embedding::text)::vector` —
+  pgvector's text form is syntactically a JSON array, so the cast is
+  direct, no per-row Python migration) and `0008_chunks_hnsw` (a real HNSW
+  index, `vector_cosine_ops` to match `search_service`'s ranking; declared
+  on the `Chunk` model too via `Index(...).ddl_if(dialect="postgresql")`
+  so it's real DDL on Postgres but skipped on SQLite, and so `alembic
+  check` doesn't flag it as drift — the same class of gap fixed for this
+  table's other indexes previously). All of this was verified against the
+  live Postgres, not just written and assumed correct: rebuilt the images,
+  ran the real migration (confirmed `\d chunks` shows `vector(1536)` and
+  the `hnsw` index), verified `alembic check` reports no drift and both
+  `alembic downgrade -1`/`upgrade head` round-trip cleanly, and — critically
+  — caught a real bug this surfaced: `GET /api/search`/`POST /api/chat`
+  raised an unhandled 500 when the embedding/LLM provider was unavailable
+  (`EmbeddingProviderUnavailable`/`LlmProviderUnavailable` were never
+  caught in `app/api/search.py`), now a clean 503. Wrote a correctly
+  1536-dim fake embedding through the real `chunk_repository` code path
+  against the live native column and confirmed `GET /api/search` returns
+  correct cosine-similarity-ranked results reading it back. 3 new tests
+  (`test_search_endpoint_503s_when_embedding_provider_unavailable`,
+  `test_chat_endpoint_503s_when_embedding_provider_unavailable`,
+  `test_chat_endpoint_503s_when_llm_provider_unavailable`,
+  `apps/backend/tests/test_search_and_chat.py`, 57 total across the
+  backend suite). Not covered: a real embedding model's actual output
+  dimension was never used (the stub server used 1536 to match the
+  configured default, not because it's semantically an OpenAI embedding);
+  a provider/model change to a different output dimension needs its own
+  migration, `EMBEDDING_DIMENSIONS` is not auto-detected.
 - ~~The document status state machine had no transition back out of
   `complete`/`failed`~~ Resolved: `complete`/`failed -> queued` is now
   allowed and `POST /api/internal/documents/{id}/reprocess` resets and

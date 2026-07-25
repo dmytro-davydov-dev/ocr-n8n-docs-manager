@@ -177,6 +177,20 @@ class SearchAndChatTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
 
+    def test_search_endpoint_503s_when_embedding_provider_unavailable(self) -> None:
+        # Regression: found live against the real stack -- with approved
+        # content to search but no EMBEDDING_BASE_URL configured (the
+        # default), hybrid_search's real get_embedding_provider() raised
+        # EmbeddingProviderUnavailable straight through to an unhandled 500
+        # instead of a clean, expected 503.
+        self._make_approved_document(
+            "doc-search-503", ["This agreement may be terminated with 30 days written notice."]
+        )
+
+        response = self.client.get("/api/search", params={"q": "termination"})
+
+        self.assertEqual(response.status_code, 503)
+
     def test_chat_endpoint_returns_answer_with_citations(self) -> None:
         self._make_approved_document(
             "doc-5", ["This agreement may be terminated with 30 days written notice."]
@@ -202,6 +216,25 @@ class SearchAndChatTest(unittest.TestCase):
             response = self.client.post("/api/chat", json={"question": "anything?"})
 
         self.assertEqual(response.status_code, 404)
+
+    def test_chat_endpoint_503s_when_embedding_provider_unavailable(self) -> None:
+        self._make_approved_document(
+            "doc-chat-503", ["This agreement may be terminated with 30 days written notice."]
+        )
+
+        response = self.client.post("/api/chat", json={"question": "How much notice?"})
+
+        self.assertEqual(response.status_code, 503)
+
+    def test_chat_endpoint_503s_when_llm_provider_unavailable(self) -> None:
+        self._make_approved_document(
+            "doc-chat-503-llm", ["This agreement may be terminated with 30 days written notice."]
+        )
+
+        with patch.object(search_service, "get_embedding_provider", lambda: FakeEmbeddingProvider()):
+            response = self.client.post("/api/chat", json={"question": "How much notice?"})
+
+        self.assertEqual(response.status_code, 503)
 
 
 if __name__ == "__main__":

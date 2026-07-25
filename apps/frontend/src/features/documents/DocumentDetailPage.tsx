@@ -61,10 +61,18 @@ export function DocumentDetailPage() {
   const documentQuery = useQuery({
     queryKey: ["document", id],
     queryFn: () => api.getDocument(id),
-    refetchInterval: (query) => (query.state.data?.status === "complete" ? false : 2000),
+    // "complete" and "failed" are both terminal from the viewer's
+    // perspective (see document_repository.ALLOWED_TRANSITIONS) -- without
+    // stopping on "failed" too, a failed document would poll every 2s
+    // forever with no way for the status to ever change back on its own.
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "complete" || status === "failed" ? false : 2000;
+    },
   });
 
   const isComplete = documentQuery.data?.status === "complete";
+  const isFailed = documentQuery.data?.status === "failed";
 
   const fileQuery = useQuery({
     queryKey: ["document-file", id],
@@ -116,7 +124,13 @@ export function DocumentDetailPage() {
           </Alert>
         )}
 
-        {documentQuery.data && !isComplete && (
+        {documentQuery.data && isFailed && (
+          <Alert severity="error">
+            Processing failed{documentQuery.data.errorMessage ? `: ${documentQuery.data.errorMessage}` : "."}
+          </Alert>
+        )}
+
+        {documentQuery.data && !isComplete && !isFailed && (
           <Alert severity="info">
             OCR is still {documentQuery.data.status}. The viewer becomes available once processing completes.
           </Alert>

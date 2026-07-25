@@ -476,6 +476,21 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
   click-through in an actual browser (Chrome extension not connected this
   session either — confirmed via `tabs_context_mcp`).
 
+- Phase 4: fixed a real bug in `DocumentDetailPage.tsx`'s status polling,
+  found the same way as the `ReviewPanel` fixes -- tracing the code against
+  `document_repository.ALLOWED_TRANSITIONS` (`complete`/`failed` are both
+  terminal from the viewer's perspective) rather than clicking through a
+  browser. `documentQuery`'s `refetchInterval` only stopped on `"complete"`,
+  so a `failed` document (the common case before the n8n credential is set
+  up, see Technical Debt) polled `GET /api/documents/{id}` every 2 seconds
+  forever with no way to stop short of navigating away. Also, a `failed`
+  document previously rendered the same generic info alert as an
+  in-progress one ("OCR is still failed" — confusing wording, wrong
+  severity, and `DocumentSummary.errorMessage` was fetched but never
+  displayed). Now stops polling on `failed` too and shows a proper error
+  alert with the actual `errorMessage`. Verified with `tsc -b` and
+  `vite build` (both clean).
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone

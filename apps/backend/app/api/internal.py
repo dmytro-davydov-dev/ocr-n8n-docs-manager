@@ -21,6 +21,16 @@ def internal_ping() -> dict[str, str]:
     return {"status": "ok", "scope": "internal"}
 
 
+def _dispatch_pipeline(document_id: str):
+    pipeline = chain(
+        validate_file.si(document_id),
+        run_ocr.si(document_id),
+        extract_fields.si(document_id),
+        generate_embeddings.si(document_id),
+    )
+    return pipeline.apply_async()
+
+
 @router.post("/documents/{document_id}/process", status_code=status.HTTP_202_ACCEPTED)
 def trigger_document_processing(document_id: str, db: Session = Depends(get_db)) -> dict[str, str]:
     """WS-04 (n8n) calls this once per upload to sequence the processing
@@ -39,13 +49,37 @@ def trigger_document_processing(document_id: str, db: Session = Depends(get_db))
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    pipeline = chain(
-        validate_file.si(document_id),
-        run_ocr.si(document_id),
-        extract_fields.si(document_id),
-        generate_embeddings.si(document_id),
-    )
-    result = pipeline.apply_async()
+    result = _dispatch_pipeline(document_id)
+    return {"document_id": document_id, "task_id": result.id}
+
+
+@router.post("/documents/{document_id}/reprocess", status_code=status.HTTP_202_ACCEPTED)
+def trigger_document_reprocessing(document_id: str, db: Session = Depends(get_db)) -> dict[str, str]:
+    """Reprocess a `complete` or `failed` document (e.g. after fixing an OCR
+    engine issue, or to re-run with different OCR/LLM/embedding config).
+    Previously there was no supported way to do this even though every task
+    in the pipeline is idempotent and would have handled it correctly
+    (ADR-011 anticipated reprocessing as a benefit of page-level OCR
+    storage) -- see document_repository.ALLOWED_TRANSITIONS. Resets the
+    document to `queued` (an explicit, audited transition) and re-dispatches
+    the same chain used for first-time processing."""
+    document = document_repository.get(db, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    # update_status() treats a same-status write as a no-op rather than an
+    # error (used elsewhere for idempotency), so a document already
+    # `queued`/`processing` must be rejected explicitly here -- otherwise a
+    # duplicate reprocess call while a pipeline run is already in flight
+    # would silently kick off a second, redundant chain.
+    if document.status not in ("complete", "failed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Document {document_id} is '{document.status}'; reprocess only applies to 'complete' or 'failed'",
+        )
+
+    document = document_repository.update_status(db, document, new_status="queued", actor="api:reprocess")
+    result = _dispatch_pipeline(document_id)
     return {"document_id": document_id, "task_id": result.id}
 
 

@@ -6,12 +6,18 @@ from app.repositories import audit_repository
 
 # Legal document-status transitions. Enforced here so no caller can push the
 # lifecycle (FR-106) into an inconsistent state via a raw status write.
+#
+# `complete`/`failed` -> `queued` supports reprocessing (ADR-011 anticipated
+# this as a benefit of page-level OCR storage): every downstream pipeline
+# task is already idempotent (upsert-by-key, re-checks current status), so
+# resetting to `queued` and re-dispatching the same chain is safe and just
+# overwrites prior OCR/extraction/chunk rows rather than duplicating them.
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "uploaded": {"queued", "failed"},
     "queued": {"processing", "failed"},
     "processing": {"complete", "failed"},
-    "complete": set(),
-    "failed": set(),
+    "complete": {"queued"},
+    "failed": {"queued"},
 }
 
 

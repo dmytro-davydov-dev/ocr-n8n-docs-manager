@@ -1549,6 +1549,69 @@
         ]
       }
     },
+    "/api/internal/documents/{document_id}/reprocess": {
+      "post": {
+        "description": "Reprocess a `complete` or `failed` document (e.g. after fixing an OCR\nengine issue, or to re-run with different OCR/LLM/embedding config).\nPreviously there was no supported way to do this even though every task\nin the pipeline is idempotent and would have handled it correctly\n(ADR-011 anticipated reprocessing as a benefit of page-level OCR\nstorage) -- see document_repository.ALLOWED_TRANSITIONS. Resets the\ndocument to `queued` (an explicit, audited transition) and re-dispatches\nthe same chain used for first-time processing.",
+        "operationId": "trigger_document_reprocessing_api_internal_documents__document_id__reprocess_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-internal-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Trigger Document Reprocessing Api Internal Documents  Document Id  Reprocess Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Document Reprocessing",
+        "tags": [
+          "internal"
+        ]
+      }
+    },
     "/api/internal/documents/{document_id}/status": {
       "patch": {
         "description": "WS-04 (n8n) calls this to report processing progress/outcome for a\ndocument it is sequencing. n8n never writes to application tables\ndirectly (ADR-006, ADR-009) \u2014 this endpoint is the only path.",

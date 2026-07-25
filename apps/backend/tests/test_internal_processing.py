@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.core.storage import LocalDocumentStorage
 from app.main import app
 from app.models import Base
+from app.repositories import document_repository
 import app.services.document_service as document_service_module
 
 
@@ -100,6 +101,66 @@ class InternalProcessingTriggerTest(unittest.TestCase):
         )
         mock_chain.assert_called_once()
         mock_chain.return_value.apply_async.assert_called_once()
+
+    def test_reprocess_requires_internal_api_key(self) -> None:
+        document_id = self._upload()
+
+        response = self.client.post(f"/api/internal/documents/{document_id}/reprocess")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_reprocess_returns_404_for_unknown_document(self) -> None:
+        response = self.client.post(
+            "/api/internal/documents/does-not-exist/reprocess",
+            headers={"x-internal-api-key": settings.internal_api_key},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_reprocess_resets_failed_document_to_queued_and_redispatches(self) -> None:
+        document_id = self._upload()
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            document = document_repository.get(db, document_id)
+            for target in ("queued", "failed"):
+                document = document_repository.update_status(db, document, new_status=target, actor="test")
+        finally:
+            db.close()
+
+        fake_result = MagicMock(id="task-456")
+        with patch("app.api.internal.chain") as mock_chain:
+            mock_chain.return_value.apply_async.return_value = fake_result
+
+            response = self.client.post(
+                f"/api/internal/documents/{document_id}/reprocess",
+                headers={"x-internal-api-key": settings.internal_api_key},
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), {"document_id": document_id, "task_id": "task-456"})
+        mock_chain.return_value.apply_async.assert_called_once()
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            self.assertEqual(document_repository.get(db, document_id).status, "queued")
+        finally:
+            db.close()
+
+    def test_reprocess_rejects_document_mid_pipeline(self) -> None:
+        document_id = self._upload()
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            document = document_repository.get(db, document_id)
+            document_repository.update_status(db, document, new_status="queued", actor="test")
+        finally:
+            db.close()
+
+        response = self.client.post(
+            f"/api/internal/documents/{document_id}/reprocess",
+            headers={"x-internal-api-key": settings.internal_api_key},
+        )
+
+        self.assertEqual(response.status_code, 409)
 
 
 if __name__ == "__main__":

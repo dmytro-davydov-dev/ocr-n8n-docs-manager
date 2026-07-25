@@ -16,7 +16,7 @@ _Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with cit
 |---|---|---:|---|---|
 | Phase 0 – Foundation | ✅ | 100% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
 | Phase 1 – Document Ingestion | 🔶 | 80% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
-| Phase 2 – OCR Pipeline | 🔶 | 75% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
+| Phase 2 – OCR Pipeline | 🔶 | 80% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
 | Phase 3 – AI Extraction | 🔶 | 75% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | 🔶 | 60% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
 | Phase 5 – Search & RAG | 🔶 | 65% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
@@ -340,6 +340,24 @@ _Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with cit
   5's PRD "In Scope" — only Phase 4 the PRD explicitly scopes frontend
   work, so this was treated as out of this pass's scope, not an oversight).
 
+- Phase 2 (WS-02/WS-03) technical debt: document reprocessing. Added the
+  `complete -> queued` and `failed -> queued` transitions to
+  `document_repository.ALLOWED_TRANSITIONS` (previously both were terminal
+  with no way back), and `POST /api/internal/documents/{id}/reprocess`
+  (`apps/backend/app/api/internal.py`) which resets a `complete`/`failed`
+  document to `queued` and re-dispatches the same
+  `validate_file -> run_ocr -> extract_fields -> generate_embeddings` chain
+  used for first-time processing -- safe because every task in that chain
+  is already idempotent (upsert-by-key, re-checks current status). A
+  document already `queued`/`processing` is rejected with 409 rather than
+  silently double-dispatched (`update_status` treats a same-status write as
+  a no-op elsewhere for idempotency, so this guard is explicit at the
+  endpoint rather than relying on that). ADR-011 anticipated reprocessing
+  as a benefit of page-level OCR storage; this closes that gap. 5 new
+  passing tests (`apps/backend/tests/test_internal_processing.py`, 54 total
+  across the backend suite): auth, 404, successful reset+redispatch, and
+  the 409 guard. Re-exported `openapi.json`.
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone
@@ -519,13 +537,14 @@ _Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with cit
   tests or move them onto Postgres) is a WS-02/WS-03 follow-up migration,
   not further WS-05 work — Phase 5's actual search/retrieval API (out of
   WS-03's scope regardless, see PRD-5) will need it.
-- The document status state machine (`document_repository.ALLOWED_TRANSITIONS`)
-  has no transition back out of `complete`/`failed`, so there is currently
-  no supported way to re-run OCR on an already-processed document even
-  though `ocr_repository.upsert_page` is idempotent and would handle it
-  correctly if reached. ADR-011 anticipates reprocessing as a benefit of the
-  page-level storage model; wiring an actual retry/reprocess transition is
-  unstarted.
+- ~~The document status state machine had no transition back out of
+  `complete`/`failed`~~ Resolved: `complete`/`failed -> queued` is now
+  allowed and `POST /api/internal/documents/{id}/reprocess` resets and
+  re-dispatches the pipeline (see Completed, below). The n8n watchdog
+  (`n8n/workflows/02-processing-watchdog.json`) still only surfaces stuck
+  documents rather than calling this endpoint automatically -- wiring an
+  actual auto-retry policy (vs. an operator-triggered one) is still
+  unstarted and deserves its own decision on retry limits/backoff.
 
 - The `backend` image `make test-backend`'s docker-compose fallback path
   runs against is stale: it only discovers 42 of the 44 backend tests,

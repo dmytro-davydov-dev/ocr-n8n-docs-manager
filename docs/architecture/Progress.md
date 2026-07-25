@@ -1,11 +1,11 @@
 # Progress
 
-_Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale docker test image and frontend-mock env-forwarding bugs fixed; paddleocr setuptools bug fixed and its remaining ARM64 segfault diagnosed — all verified against the live docker stack, not just unit tests)
+_Last updated:_ 2026-07-25 (Phase 5 Search/Chat API + native pgvector column; Phase 2 reprocessing + real paddleocr working end-to-end; several real frontend bugs found by code-tracing; multiple infra bugs fixed — all verified against the live docker stack, not just unit tests)
 
 ## Overall Status
 
 - **Current Phase:** Phase 5 – Search & RAG
-- **Overall Progress:** 58%
+- **Overall Progress:** 68%
 - **Project Status:** 🟢 On Track
 
 ---
@@ -16,7 +16,7 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
 |---|---|---:|---|---|
 | Phase 0 – Foundation | ✅ | 100% | [[templates/PRD-Phase-0-Foundation\|PRD-0]] | ADR-001 to ADR-009 |
 | Phase 1 – Document Ingestion | 🔶 | 85% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
-| Phase 2 – OCR Pipeline | 🔶 | 80% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
+| Phase 2 – OCR Pipeline | 🔶 | 95% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
 | Phase 3 – AI Extraction | 🔶 | 80% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | 🔶 | 65% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
 | Phase 5 – Search & RAG | 🔶 | 85% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
@@ -491,6 +491,16 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
   alert with the actual `errorMessage`. Verified with `tsc -b` and
   `vite build` (both clean).
 
+- Phase 2: got real `paddleocr` OCR working end-to-end in the actual
+  `celery-worker` container for the first time (previously verified only
+  via `compileall`). Found and fixed three stacked bugs blocking it
+  (missing `setuptools`, a `paddlepaddle==2.6.2` segfault on this host's
+  aarch64 architecture, a missing `libgl1` system library for `cv2`) and
+  confirmed real OCR output (~99% confidence, correct text) both by
+  calling `PaddleOcrEngine` directly and by driving a real upload through
+  the actual pipeline via `/reprocess` with `OCR_ENGINE=paddleocr`. See
+  Technical Debt for the full blow-by-blow.
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone
@@ -645,38 +655,50 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
   a given environment, a document can still reach `queued` but nothing
   moves it to `processing`/`complete` outside of a test or a manual
   `curl` calling `/process` directly.
-- Made a real attempt at exercising `paddleocr` inside the actual
-  `celery-worker` container (this environment's Docker Desktop was
-  running the full stack, unlike prior sessions) and got further than
-  before, but it's still not working end-to-end:
-  1. Uploaded `fixtures/ocr_extraction/sample_contract.pdf` via
-     `POST /api/documents` and drove it through the real pipeline with the
-     new `POST /api/internal/documents/{id}/reprocess` (bypassing the
-     n8n-credential blocker below entirely). It failed immediately with
-     `OCR_ENGINE=paddleocr but the paddleocr package is not installed` --
-     misleading, since `paddleocr` *is* installed; `import paddleocr`
-     actually fails deep in `paddlepaddle`'s own import chain
-     (`paddle.utils.cpp_extension` -> `import setuptools` ->
-     `ModuleNotFoundError`) because paddlepaddle uses `setuptools` at
-     runtime without declaring it as a dependency, and the `python:3.12-slim`
-     base image no longer bundles it. Fixed for real: pinned
-     `setuptools==75.1.0` in `apps/backend/requirements.txt`, rebuilt, and
-     confirmed `import paddleocr` gets past that error.
-  2. With that fixed, `import paddle` **segfaults** (exit 139) on this
-     machine -- confirmed directly with
-     `docker compose exec celery-worker python -c "import paddle"`. This
-     environment is Docker Desktop on Apple Silicon (`uname -m` ->
-     `aarch64`); `paddlepaddle==2.6.2`'s behavior on aarch64 Linux is the
-     suspect, not a Python-level fix. This is a genuinely different, harder
-     problem than "not installed" (a native crash in a pinned third-party
-     ML wheel) and trying paddlepaddle version/build alternatives blindly
-     risked leaving the pinned dependency in a worse, unverified state than
-     documenting the precise failure -- deliberately stopped here rather
-     than guess further. The `setuptools` fix stands regardless (it's a
-     real bug independent of the segfault, and likely unblocks paddleocr
-     entirely on an x86_64 host). Next step for whoever picks this up:
-     reproduce on x86_64, or try a newer `paddlepaddle` release with
-     official aarch64 wheels.
+- ~~`paddleocr` has never been exercised in the actual `celery-worker`
+  container~~ Fully resolved, closing the single longest-standing Phase 2
+  gap. Three real, distinct bugs stacked on top of each other, each found
+  and fixed by actually running it against the live stack rather than
+  guessing:
+  1. `import paddleocr` failed with a misleading `"the paddleocr package
+     is not installed"` — paddlepaddle uses `setuptools` at runtime
+     without declaring it as a dependency, and `python:3.12-slim` no
+     longer bundles it. Fixed: pinned `setuptools==75.1.0`.
+  2. With that fixed, `import paddle` **segfaulted** (exit 139) —
+     confirmed directly on this machine's architecture (Docker Desktop on
+     Apple Silicon, `aarch64`). `paddlepaddle==2.6.2` is the culprit, not
+     a Python-level issue. Fixed by actually testing alternatives instead
+     of stopping at "diagnosed": `pip index versions paddlepaddle` inside
+     the container showed a 3.x line (latest 3.2.2); installed it ad hoc
+     first to confirm `import paddle` succeeds before touching
+     `requirements.txt`, then bumped the pin for real.
+  3. With paddle importable, `import paddleocr` hit a *third*, unrelated
+     issue: `ImportError: libGL.so.1: cannot open shared object file` —
+     `cv2` (pulled in by paddleocr) needs a system OpenGL library the
+     `python:3.12-slim` image doesn't have. Fixed: added `libgl1`/
+     `libglib2.0-0` to `apps/backend/Dockerfile`'s `apt-get install`.
+  With all three fixed, verified as deep as this pipeline goes, not just
+  "engine constructs without crashing": rebuilt the images, instantiated
+  the real `PaddleOcrEngine` (it downloaded its detection/recognition/
+  angle-classification model weights from PaddleOCR's CDN on first use —
+  works from this network), ran `recognize_page` directly against a page
+  rasterized from `fixtures/ocr_extraction/sample_contract.pdf` and got
+  correct text back at ~99% confidence, then drove a fresh upload through
+  the *actual* `POST /api/internal/documents/{id}/reprocess` ->
+  `validate_file -> run_ocr -> extract_fields` chain end-to-end with
+  `OCR_ENGINE=paddleocr` (the real default, no `null`-engine workaround)
+  and confirmed the document reached `complete` with both pages'
+  `GET /api/documents/{id}/ocr` output matching the fixture's real text
+  and `ocrEngineVersion: "paddleocr:2.9.1"`. Full 57-test suite still
+  passes unchanged (paddleocr/paddle are lazy-imported, so the version
+  bump doesn't touch anything the unit tests exercise). Not yet updated:
+  `fixtures/ocr_extraction/sample_contract.ocr.json`'s golden text was
+  captured from a different (fake/fixture) OCR path and doesn't
+  byte-for-byte match real paddleocr's output (e.g. `$5,ooo.00` — a
+  digit/letter OCR artifact) — `test_regression_fixtures.py` intentionally
+  doesn't run against a real engine (see its own docstring), so this
+  doesn't affect the test suite, but the golden file is not a claim about
+  real paddleocr accuracy.
 - ~~`documents.extract_fields`/`generate_embeddings` have never been run
   against a real OpenAI-compatible endpoint~~ Partially resolved: verified
   `OpenAiCompatibleLlmProvider`/`OpenAiCompatibleEmbeddingProvider`'s actual

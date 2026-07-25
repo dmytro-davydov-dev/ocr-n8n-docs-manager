@@ -19,4 +19,8 @@ pgvector==0.5.0
 # as the generic OcrEngineUnavailable from app/services/ocr_engine.py).
 setuptools==75.1.0
 paddleocr==2.9.1
-paddlepaddle==2.6.2
+# paddlepaddle==2.6.2 segfaults on import on aarch64 Linux (confirmed
+# directly: exit 139 on `import paddle` in the actual celery-worker
+# container). 3.2.2 imports cleanly on the same architecture -- verified
+# the same way, not assumed.
+paddlepaddle==3.2.2

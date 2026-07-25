@@ -138,6 +138,10 @@ Copy `.env.example` to `.env` and adjust values as needed.
 | EMBEDDING_MAX_RETRIES | Celery retry attempts for transient embedding failures | 3 |
 | CHUNK_TOKEN_LIMIT | Max tokens (whitespace-approximated) per chunk (ADR-018) | 500 |
 | CHUNK_OVERLAP_TOKENS | Token overlap between consecutive chunks | 50 |
+| SEARCH_KEYWORD_WEIGHT | Weight of the lexical signal in hybrid search ranking (ADR-019) | 0.4 |
+| SEARCH_VECTOR_WEIGHT | Weight of the vector-similarity signal in hybrid search ranking (ADR-019) | 0.6 |
+| SEARCH_DEFAULT_LIMIT | Default number of results from `GET /api/search` | 10 |
+| CHAT_CONTEXT_CHUNKS | Number of retrieved chunks passed as context to `POST /api/chat` (ADR-020) | 5 |
 | WORKER_CPU_LIMIT | celery-worker CPU limit (Phase 2: OCR is CPU-heavy) | 2 |
 | WORKER_MEMORY_LIMIT | celery-worker memory limit | 4G |
 | WORKER_CPU_RESERVATION | celery-worker CPU reservation | 0.5 |

@@ -15,6 +15,79 @@
         "title": "Body_upload_document_api_documents_post",
         "type": "object"
       },
+      "ChatCitationOut": {
+        "properties": {
+          "chunkIndex": {
+            "title": "Chunkindex",
+            "type": "integer"
+          },
+          "documentId": {
+            "title": "Documentid",
+            "type": "string"
+          },
+          "pageNumber": {
+            "title": "Pagenumber",
+            "type": "integer"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "chunkIndex",
+          "pageNumber",
+          "snippet",
+          "score"
+        ],
+        "title": "ChatCitationOut",
+        "type": "object"
+      },
+      "ChatRequest": {
+        "properties": {
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "ChatRequest",
+        "type": "object"
+      },
+      "ChatResponseOut": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/ChatCitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer",
+          "citations",
+          "model"
+        ],
+        "title": "ChatResponseOut",
+        "type": "object"
+      },
       "ChunkOut": {
         "description": "RAG chunk + embedding metadata (ADR-016/017/018).",
         "properties": {
@@ -438,6 +511,50 @@
         "title": "ReviewTransitionRequest",
         "type": "object"
       },
+      "SearchResultOut": {
+        "description": "One ranked chunk from hybrid retrieval (ADR-019, FR-503/504/505).",
+        "properties": {
+          "chunkIndex": {
+            "title": "Chunkindex",
+            "type": "integer"
+          },
+          "documentId": {
+            "title": "Documentid",
+            "type": "string"
+          },
+          "keywordScore": {
+            "title": "Keywordscore",
+            "type": "number"
+          },
+          "pageNumber": {
+            "title": "Pagenumber",
+            "type": "integer"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "vectorScore": {
+            "title": "Vectorscore",
+            "type": "number"
+          }
+        },
+        "required": [
+          "documentId",
+          "chunkIndex",
+          "pageNumber",
+          "snippet",
+          "keywordScore",
+          "vectorScore",
+          "score"
+        ],
+        "title": "SearchResultOut",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -499,6 +616,48 @@
           }
         },
         "summary": "Root"
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "description": "FR-506: AI Q&A grounded in approved contracts, with verifiable citations (ADR-020).",
+        "operationId": "chat_api_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponseOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat",
+        "tags": [
+          "search"
+        ]
       }
     },
     "/api/documents": {
@@ -1327,6 +1486,69 @@
         ]
       }
     },
+    "/api/internal/documents/{document_id}/reindex": {
+      "post": {
+        "description": "FR-507: re-run chunking/embedding for a document on demand (e.g. after\nOCR was manually re-run, or a chunking/embedding config change). Safe to\ncall any time -- `generate_embeddings` re-reads the document's current\nOCR text, upserts by (document_id, chunk_index), and drops any stale\ntrailing chunks from a prior run (see chunk_repository.delete_from_index),\nso this never duplicates or leaves orphaned chunks behind.",
+        "operationId": "trigger_document_reindex_api_internal_documents__document_id__reindex_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-internal-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Trigger Document Reindex Api Internal Documents  Document Id  Reindex Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Document Reindex",
+        "tags": [
+          "internal"
+        ]
+      }
+    },
     "/api/internal/documents/{document_id}/status": {
       "patch": {
         "description": "WS-04 (n8n) calls this to report processing progress/outcome for a\ndocument it is sequencing. n8n never writes to application tables\ndirectly (ADR-006, ADR-009) \u2014 this endpoint is the only path.",
@@ -1446,6 +1668,66 @@
         "summary": "Internal Ping",
         "tags": [
           "internal"
+        ]
+      }
+    },
+    "/api/search": {
+      "get": {
+        "description": "FR-503/504/505: hybrid keyword + semantic search over approved contracts.",
+        "operationId": "search_api_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SearchResultOut"
+                  },
+                  "title": "Response Search Api Search Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "search"
         ]
       }
     }

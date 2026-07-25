@@ -49,6 +49,22 @@ def trigger_document_processing(document_id: str, db: Session = Depends(get_db))
     return {"document_id": document_id, "task_id": result.id}
 
 
+@router.post("/documents/{document_id}/reindex", status_code=status.HTTP_202_ACCEPTED)
+def trigger_document_reindex(document_id: str, db: Session = Depends(get_db)) -> dict[str, str]:
+    """FR-507: re-run chunking/embedding for a document on demand (e.g. after
+    OCR was manually re-run, or a chunking/embedding config change). Safe to
+    call any time -- `generate_embeddings` re-reads the document's current
+    OCR text, upserts by (document_id, chunk_index), and drops any stale
+    trailing chunks from a prior run (see chunk_repository.delete_from_index),
+    so this never duplicates or leaves orphaned chunks behind."""
+    document = document_repository.get(db, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    result = generate_embeddings.apply_async(args=[document_id])
+    return {"document_id": document_id, "task_id": result.id}
+
+
 @router.patch("/documents/{document_id}/status", response_model=DocumentSummary)
 def update_document_status(
     document_id: str, body: DocumentStatusUpdate, db: Session = Depends(get_db)

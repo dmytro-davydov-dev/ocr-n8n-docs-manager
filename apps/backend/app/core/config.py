@@ -64,5 +64,13 @@ class Settings(BaseSettings):
     chunk_token_limit: int = Field(default=500, alias="CHUNK_TOKEN_LIMIT")
     chunk_overlap_tokens: int = Field(default=50, alias="CHUNK_OVERLAP_TOKENS")
 
+    # Phase 5 (ADR-019): hybrid retrieval ranking weights. Must not both be
+    # zero; kept as separate knobs (rather than a single mix ratio) so an
+    # operator can disable one signal entirely (e.g. vector-only) via env.
+    search_keyword_weight: float = Field(default=0.4, alias="SEARCH_KEYWORD_WEIGHT")
+    search_vector_weight: float = Field(default=0.6, alias="SEARCH_VECTOR_WEIGHT")
+    search_default_limit: int = Field(default=10, alias="SEARCH_DEFAULT_LIMIT")
+    chat_context_chunks: int = Field(default=5, alias="CHAT_CONTEXT_CHUNKS")
+
 
 settings = Settings()

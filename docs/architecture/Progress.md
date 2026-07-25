@@ -1,11 +1,11 @@
 # Progress
 
-_Last updated:_ 2026-07-24 (WS-01 frontend: review workspace UI closing the Phase 4 milestone, plus a backend fix adding the missing `rejected -> draft_review` transition endpoint)
+_Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with citations, backend-complete and tested)
 
 ## Overall Status
 
-- **Current Phase:** Phase 1 – Document Ingestion
-- **Overall Progress:** 48%
+- **Current Phase:** Phase 5 – Search & RAG
+- **Overall Progress:** 55%
 - **Project Status:** 🟢 On Track
 
 ---
@@ -19,7 +19,7 @@ _Last updated:_ 2026-07-24 (WS-01 frontend: review workspace UI closing the Phas
 | Phase 2 – OCR Pipeline | 🔶 | 75% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
 | Phase 3 – AI Extraction | 🔶 | 75% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | 🔶 | 60% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
-| Phase 5 – Search & RAG | 🔶 | 30% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
+| Phase 5 – Search & RAG | 🔶 | 65% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
 ---
 
@@ -296,6 +296,50 @@ _Last updated:_ 2026-07-24 (WS-01 frontend: review workspace UI closing the Phas
   populated and retrievable. Full backend suite: 44 tests passing
   (`make test-backend`).
 
+- Phase 5 (WS-02/WS-03): hybrid Search API and RAG Chat API, closing most of
+  PRD-5's Backend deliverables (FR-503/504/505/506/507). Added
+  `app/services/search_service.py` (`hybrid_search`, ADR-019): combines a
+  portable lexical signal (term-frequency substring match — works
+  identically against Postgres and the SQLite test DB, so no
+  Postgres-only `tsvector` dependency was introduced) with a
+  vector-similarity signal (cosine similarity over the existing JSON-stored
+  chunk embeddings — see Technical Debt on why that's not a native pgvector
+  column yet) into one configurable score
+  (`SEARCH_KEYWORD_WEIGHT`/`SEARCH_VECTOR_WEIGHT`). Critically, FR-501
+  ("Approved contracts are indexed") is enforced as a query-time filter
+  (`searchable_chunks` inner-joins `Chunk -> Document -> Review` on
+  `Review.status == 'approved'`), not by changing when embeddings are
+  generated — `generate_embeddings` still runs as soon as OCR/extraction
+  finish (WS-03's existing pipeline, independent of review state), so a
+  chunk exists but is simply unreachable through search/chat until its
+  document's review is approved. This was a deliberate scope choice to
+  avoid touching the already-tested ingestion chain. Added
+  `app/services/rag_service.py` (`answer_question`, ADR-020): retrieves via
+  the same hybrid search, builds a numbered context block from the
+  retrieved chunks, and calls the configured `LlmProvider` for an answer.
+  Citations are built directly from the retrieved chunks (document id, page,
+  chunk index, snippet, score) rather than parsed out of the LLM's own
+  output, so every citation is independently verifiable against real
+  retrieval results (FR-506) instead of trusting the model to self-report
+  accurately. Added `GET /api/search?q=` and `POST /api/chat` (new
+  `app/api/search.py`, registered in `main.py`), plus an internal
+  `POST /api/internal/documents/{id}/reindex` (FR-507) that re-dispatches
+  the existing idempotent `generate_embeddings` task on demand — safe to
+  call any time since it upserts by `(document_id, chunk_index)` and drops
+  stale trailing chunks from a prior run. 6 new passing tests
+  (`apps/backend/tests/test_search_and_chat.py`, 50 total across the
+  backend suite): ranking order with a fake embedding provider, the FR-501
+  approval gate (chunks from an unapproved document never appear), the two
+  HTTP endpoints end-to-end with fake LLM/embedding providers, and a 404
+  when no indexed content matches. Re-exported `openapi.json`. Not done:
+  n8n-level orchestration of the RAG pipeline (ADR-020 calls for n8n to own
+  "query -> retrieval -> reranking -> ... -> response" as an observable
+  workflow; this pass implements retrieval/business logic as backend
+  services only, callable directly, with no n8n workflow in front of
+  `/api/chat` yet) and a frontend search/chat UI (not listed under Phase
+  5's PRD "In Scope" — only Phase 4 the PRD explicitly scopes frontend
+  work, so this was treated as out of this pass's scope, not an oversight).
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone
@@ -501,6 +545,22 @@ _Last updated:_ 2026-07-24 (WS-01 frontend: review workspace UI closing the Phas
   with a plain `npm install` (no lockfile/package.json changes needed) —
   if this recurs, that's the fix; no need to delete `node_modules`/
   `package-lock.json` as the error message itself suggests.
+
+- Phase 5's Search/Chat APIs (`app/services/search_service.py`,
+  `app/services/rag_service.py`) are backend-only: ADR-020 specifies n8n
+  should orchestrate the RAG pipeline (query -> retrieval -> reranking ->
+  prompt -> LLM -> citations -> response) for observability, but no
+  `n8n/workflows/` entry fronts `/api/chat` yet -- it's called directly.
+  There's also no frontend for search/chat (not in Phase 5's PRD scope, so
+  this is expected, not a gap against PRD-5's Acceptance Criteria, but
+  users can only reach these APIs via `curl`/Swagger today). Hybrid
+  ranking is a fixed formula (`SEARCH_KEYWORD_WEIGHT`/`SEARCH_VECTOR_WEIGHT`
+  applied uniformly); ADR-019's "configurable ranking" is satisfied at the
+  weight level, not with pluggable ranking strategies. Vector similarity is
+  computed in Python over every approved chunk's JSON-stored embedding
+  (`search_service._cosine_similarity`, O(n) per query) rather than an ANN
+  index query -- fine at fixture scale, but depends on the pgvector-column
+  migration below to scale.
 
 ## Open Questions
 

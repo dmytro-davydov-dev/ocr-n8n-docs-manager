@@ -38,7 +38,23 @@ from app.tasks.extraction import extract_fields
 from app.tasks.file_validation import validate_file
 from app.tasks.ocr import run_ocr
 
-FIXTURES_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "ocr_extraction"
+def _fixtures_dir() -> Path:
+    """Locate `fixtures/ocr_extraction` in both layouts this suite runs in:
+    local dev (apps/backend/tests/<file> -> repo root is 3 parents up) and
+    the backend container (build context is apps/backend, so the repo-root
+    `fixtures/` is bind-mounted at `/app/fixtures` instead -- see
+    docker-compose.yml's `backend` service volumes)."""
+    here = Path(__file__).resolve()
+    candidates = [here.parent.parent / "fixtures" / "ocr_extraction"]
+    if len(here.parents) > 3:
+        candidates.append(here.parents[3] / "fixtures" / "ocr_extraction")
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"Could not locate fixtures/ocr_extraction; checked {candidates}")
+
+
+FIXTURES_DIR = _fixtures_dir()
 
 
 class FixtureOcrEngine:

@@ -48,8 +48,13 @@ services:
       EMBEDDING_MAX_RETRIES: ${EMBEDDING_MAX_RETRIES:-3}
       CHUNK_TOKEN_LIMIT: ${CHUNK_TOKEN_LIMIT:-500}
       CHUNK_OVERLAP_TOKENS: ${CHUNK_OVERLAP_TOKENS:-50}
+      SEARCH_KEYWORD_WEIGHT: ${SEARCH_KEYWORD_WEIGHT:-0.4}
+      SEARCH_VECTOR_WEIGHT: ${SEARCH_VECTOR_WEIGHT:-0.6}
+      SEARCH_DEFAULT_LIMIT: ${SEARCH_DEFAULT_LIMIT:-10}
+      CHAT_CONTEXT_CHUNKS: ${CHAT_CONTEXT_CHUNKS:-5}
     volumes:
       - documents:/documents
+      - ./fixtures:/app/fixtures:ro
     depends_on:
       postgres:
         condition: service_healthy

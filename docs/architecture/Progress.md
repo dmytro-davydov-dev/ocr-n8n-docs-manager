@@ -358,6 +358,36 @@ _Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with cit
   across the backend suite): auth, 404, successful reset+redispatch, and
   the 409 guard. Re-exported `openapi.json`.
 
+- WS-06 technical debt: fixed `make test-backend`'s stale docker-compose
+  image. Rebuilding `backend`/`celery-worker` (`docker compose build`) to
+  pick up this session's new code surfaced a real, previously-hidden bug:
+  `test_regression_fixtures.py`'s `FIXTURES_DIR = Path(__file__).resolve()
+  .parents[3] / "fixtures" / "ocr_extraction"` assumes the local-dev
+  nesting (`apps/backend/tests/<file>` -> repo root 3 parents up), but the
+  backend/celery-worker images build from `apps/backend` as their context
+  (`docker-compose.yml`), so the repo-root `fixtures/` directory was never
+  part of the image at all -- `parents[3]` doesn't even exist inside
+  `/app/tests/<file>` in the container, so the test errored on import
+  (`IndexError: 3`) rather than just failing to find files. This had been
+  silently masked because the image was never rebuilt after the test was
+  added (see the prior stale-image entry). Fixed by bind-mounting the
+  repo-root `fixtures/` at `/app/fixtures` for the `backend` service
+  (`docker-compose.yml`) and making `_fixtures_dir()` in the test try both
+  the container layout (`apps/backend/fixtures`, i.e. `/app/fixtures` from
+  the container's perspective) and the local-dev layout, using whichever
+  exists. Verified against the real stack, not just in isolation: rebuilt
+  both images, ran the full suite through `docker compose run --rm backend
+  python -m unittest discover` (54/54 passing, matching the local `.venv`
+  run), then `docker compose up -d backend celery-worker` to pick up the
+  rebuilt images on the already-running dev stack and confirmed
+  `GET /api/health` and `GET /api/search` respond correctly against the
+  live Postgres/Redis. `make test-backend`'s docker-compose fallback path
+  can now be trusted again. Also forwarded the new
+  `SEARCH_KEYWORD_WEIGHT`/`SEARCH_VECTOR_WEIGHT`/`SEARCH_DEFAULT_LIMIT`/
+  `CHAT_CONTEXT_CHUNKS` settings into the `backend` service's environment
+  block and `.env.example` (WS-05's established practice, avoiding the
+  exact "documented but not forwarded" bug WS-05 fixed previously).
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone
@@ -546,17 +576,15 @@ _Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with cit
   actual auto-retry policy (vs. an operator-triggered one) is still
   unstarted and deserves its own decision on retry limits/backoff.
 
-- The `backend` image `make test-backend`'s docker-compose fallback path
-  runs against is stale: it only discovers 42 of the 44 backend tests,
-  silently skipping `test_ingestion_integration.py` and
-  `test_regression_fixtures.py` (added by WS-06) because the image was
-  never rebuilt after those files were added. `make test-backend` still
-  reports `OK`, which is misleading — it's exercising fewer tests than the
-  repo has, not confirming full coverage. Needs `docker compose build
-  backend` (or equivalent) before it can be trusted again; ran the full
-  44-test suite via `apps/backend/.venv` directly to confirm nothing in
-  this change broke, but that bypasses whatever `make test-backend`'s
-  container path is meant to pin.
+- ~~The `backend` image `make test-backend`'s docker-compose fallback path
+  runs against is stale~~ Resolved: rebuilt (`docker compose build backend
+  celery-worker`) and verified 54/54 tests pass through
+  `docker compose run --rm backend python -m unittest discover` (see
+  Completed, below). Rebuilding surfaced and fixed a real bug in
+  `test_regression_fixtures.py`'s fixtures-directory path resolution that
+  the stale image had been hiding. CI (`.github/workflows/backend.yml`)
+  builds a fresh image every run, so it was never affected by this --
+  only the local `make test-backend` fallback was stale.
 - `apps/frontend/node_modules` was missing the platform-specific
   `@rollup/rollup-darwin-arm64` optional dependency (a known npm bug,
   npm/cli#4828), breaking both `vite build` and `vite --host ...` (dev

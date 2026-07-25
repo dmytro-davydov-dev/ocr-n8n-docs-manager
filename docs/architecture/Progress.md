@@ -1,11 +1,11 @@
 # Progress
 
-_Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with citations, backend-complete and tested)
+_Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale docker test image and frontend-mock env-forwarding bugs fixed; paddleocr setuptools bug fixed and its remaining ARM64 segfault diagnosed — all verified against the live docker stack, not just unit tests)
 
 ## Overall Status
 
 - **Current Phase:** Phase 5 – Search & RAG
-- **Overall Progress:** 55%
+- **Overall Progress:** 58%
 - **Project Status:** 🟢 On Track
 
 ---

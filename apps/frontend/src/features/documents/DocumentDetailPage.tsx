@@ -23,6 +23,7 @@ import {
 import { ApiError } from "@contract-review/api-client";
 
 import { api } from "../../api";
+import { ReviewPanel } from "./ReviewPanel";
 
 function confidenceColor(score: number): ChipProps["color"] {
   if (score >= 0.9) return "success";
@@ -235,6 +236,8 @@ export function DocumentDetailPage() {
             )}
           </Paper>
         )}
+
+        {isComplete && <ReviewPanel documentId={id} extractionContent={extractionQuery.data?.content} />}
       </Container>
     </>
   );

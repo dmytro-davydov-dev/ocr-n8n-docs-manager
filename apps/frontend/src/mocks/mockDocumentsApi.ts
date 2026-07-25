@@ -3,6 +3,9 @@ import type {
   DocumentSummary,
   ExtractionResult,
   OcrPage,
+  ReviewRevision,
+  ReviewStatus,
+  ReviewSummary,
 } from "@contract-review/api-client";
 
 /**
@@ -25,6 +28,65 @@ let idCounter = 0;
 const fileBlobs = new Map<string, Blob>();
 const ocrResults = new Map<string, OcrPage[]>();
 const extractionResults = new Map<string, ExtractionResult>();
+const reviews = new Map<string, ReviewSummary>();
+const reviewHistory = new Map<string, ReviewRevision[]>();
+let reviewIdCounter = 0;
+let revisionIdCounter = 0;
+
+// Mirrors app/repositories/review_repository.py's ALLOWED_TRANSITIONS
+// (ADR-014) so the mock enforces the same state machine as the real API.
+const REVIEW_TRANSITIONS: Record<ReviewStatus, ReviewStatus[]> = {
+  draft_review: ["in_review", "archived"],
+  in_review: ["approved", "rejected", "draft_review"],
+  approved: ["archived"],
+  rejected: ["draft_review", "archived"],
+  archived: [],
+};
+
+function recordReviewRevision(documentId: string, review: ReviewSummary): void {
+  revisionIdCounter += 1;
+  const revision: ReviewRevision = {
+    id: `revision-${revisionIdCounter}`,
+    version: review.version,
+    status: review.status,
+    content: review.content,
+    actor: "mock-user",
+    createdAt: nowIso(),
+  };
+  reviewHistory.set(documentId, [...(reviewHistory.get(documentId) ?? []), revision]);
+}
+
+function transitionReview(
+  documentId: string,
+  newStatus: ReviewStatus,
+  expectedVersion: number,
+  rejectionReason?: string
+): Response {
+  const review = reviews.get(documentId);
+  if (!review) return jsonResponse({ detail: "Review not found" }, 404);
+  if (!REVIEW_TRANSITIONS[review.status].includes(newStatus)) {
+    return jsonResponse({ detail: `Cannot transition review from '${review.status}' to '${newStatus}'` }, 409);
+  }
+  if (review.version !== expectedVersion) {
+    return jsonResponse({ detail: "Stale version" }, 412);
+  }
+  if (newStatus === "approved" && Object.keys(review.content).length === 0) {
+    return jsonResponse({ detail: "Cannot approve a review with no content" }, 422);
+  }
+  if (newStatus === "rejected" && !rejectionReason) {
+    return jsonResponse({ detail: "A rejection reason is required" }, 422);
+  }
+  const updated: ReviewSummary = {
+    ...review,
+    status: newStatus,
+    rejectionReason: newStatus === "rejected" ? (rejectionReason ?? null) : null,
+    version: review.version + 1,
+    updatedAt: nowIso(),
+  };
+  reviews.set(documentId, updated);
+  recordReviewRevision(documentId, updated);
+  return jsonResponse(updated);
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -203,6 +265,11 @@ export function installDocumentMocks(baseUrl: string): void {
   const ocrUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)/ocr$`);
   const extractionUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)/extraction$`);
   const fileUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)/file$`);
+  const reviewHistoryUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)/review/history$`);
+  const reviewActionUrlPattern = new RegExp(
+    `^${escapeRegExp(listUrl)}/([^/]+)/review/(submit|approve|reject|revise|archive)$`
+  );
+  const reviewUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)/review$`);
   const singleUrlPattern = new RegExp(`^${escapeRegExp(listUrl)}/([^/]+)$`);
 
   window.fetch = async (input, init) => {
@@ -230,6 +297,82 @@ export function installDocumentMocks(baseUrl: string): void {
       return blob
         ? new Response(blob, { status: 200, headers: { "Content-Type": "application/pdf" } })
         : jsonResponse({ message: "File not found" }, 404);
+    }
+
+    const reviewHistoryMatch = url.match(reviewHistoryUrlPattern);
+    if (reviewHistoryMatch) {
+      return jsonResponse(reviewHistory.get(reviewHistoryMatch[1]) ?? []);
+    }
+
+    const reviewActionMatch = url.match(reviewActionUrlPattern);
+    if (reviewActionMatch) {
+      const [, documentId, action] = reviewActionMatch;
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      const actionToStatus: Record<string, ReviewStatus> = {
+        submit: "in_review",
+        approve: "approved",
+        reject: "rejected",
+        revise: "draft_review",
+        archive: "archived",
+      };
+      return transitionReview(documentId, actionToStatus[action], body.expectedVersion, body.reason);
+    }
+
+    const reviewMatch = url.match(reviewUrlPattern);
+    if (reviewMatch) {
+      const documentId = reviewMatch[1];
+      const method = init?.method ?? "GET";
+
+      if (method === "GET") {
+        const review = reviews.get(documentId);
+        return review ? jsonResponse(review) : jsonResponse({ detail: "Review not found" }, 404);
+      }
+
+      if (method === "POST") {
+        if (reviews.has(documentId)) {
+          return jsonResponse({ detail: "Review already exists" }, 409);
+        }
+        const doc = store.find((d) => d.id === documentId);
+        if (!doc || doc.status !== "complete") {
+          return jsonResponse({ detail: "Document is not ready for review" }, 409);
+        }
+        const body = init?.body ? JSON.parse(init.body as string) : { content: {} };
+        reviewIdCounter += 1;
+        const review: ReviewSummary = {
+          id: `review-${reviewIdCounter}`,
+          documentId,
+          status: "draft_review",
+          version: 1,
+          content: body.content ?? {},
+          rejectionReason: null,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        };
+        reviews.set(documentId, review);
+        recordReviewRevision(documentId, review);
+        return jsonResponse(review, 201);
+      }
+
+      if (method === "PATCH") {
+        const review = reviews.get(documentId);
+        if (!review) return jsonResponse({ detail: "Review not found" }, 404);
+        if (review.status !== "draft_review") {
+          return jsonResponse({ detail: `Review cannot be edited while in status '${review.status}'` }, 409);
+        }
+        const body = init?.body ? JSON.parse(init.body as string) : {};
+        if (review.version !== body.expectedVersion) {
+          return jsonResponse({ detail: "Stale version" }, 412);
+        }
+        const updated: ReviewSummary = {
+          ...review,
+          content: body.content ?? {},
+          version: review.version + 1,
+          updatedAt: nowIso(),
+        };
+        reviews.set(documentId, updated);
+        recordReviewRevision(documentId, updated);
+        return jsonResponse(updated);
+      }
     }
 
     const singleMatch = url.match(singleUrlPattern);

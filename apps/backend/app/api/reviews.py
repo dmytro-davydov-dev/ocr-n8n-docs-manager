@@ -108,6 +108,16 @@ def archive_review(
     return _transition(db, document_id, new_status="archived", expected_version=body.expected_version)
 
 
+@router.post("/revise", response_model=ReviewSummary)
+def revise_review(
+    document_id: str, body: ReviewTransitionRequest, db: Session = Depends(get_db)
+) -> ReviewSummary:
+    """ADR-014 permits `rejected -> draft_review` (a rejected review goes
+    back for edits) but until now no endpoint exposed it -- `/submit` always
+    targets `in_review`, so a rejected review had no way back to draft."""
+    return _transition(db, document_id, new_status="draft_review", expected_version=body.expected_version)
+
+
 @router.get("/history", response_model=list[ReviewRevisionSummary])
 def get_review_history(document_id: str, db: Session = Depends(get_db)) -> list[ReviewRevisionSummary]:
     """Phase-4 audit-history API: the append-only sequence of every review

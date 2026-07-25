@@ -197,11 +197,25 @@ class ReviewsApiTest(unittest.TestCase):
         self.assertEqual(rejected.json()["status"], "rejected")
         self.assertEqual(rejected.json()["rejectionReason"], "missing indemnity clause")
 
-        back_to_draft = self.client.post(
+        # rejected -> in_review is not legal; only draft_review/archived are.
+        back_to_in_review = self.client.post(
             f"/api/documents/{document_id}/review/submit", json={"expectedVersion": 3}
         )
-        # rejected -> in_review is not legal; only draft_review/archived are.
-        self.assertEqual(back_to_draft.status_code, 409)
+        self.assertEqual(back_to_in_review.status_code, 409)
+
+        revised = self.client.post(
+            f"/api/documents/{document_id}/review/revise", json={"expectedVersion": 3}
+        )
+        self.assertEqual(revised.status_code, 200)
+        self.assertEqual(revised.json()["status"], "draft_review")
+        self.assertIsNone(revised.json()["rejectionReason"])
+
+        edited = self.client.patch(
+            f"/api/documents/{document_id}/review",
+            json={"content": {"a": 2}, "expectedVersion": 4},
+        )
+        self.assertEqual(edited.status_code, 200)
+        self.assertEqual(edited.json()["content"], {"a": 2})
 
     def test_review_mutations_are_audit_logged(self) -> None:
         from app.models.audit_log import AuditLog

@@ -61,6 +61,41 @@ export interface ExtractionResult {
   processingTimestamp: string;
 }
 
+/**
+ * ADR-014 review lifecycle: `draft_review -> in_review -> approved|rejected`,
+ * `rejected -> draft_review|archived`, `approved -> archived`.
+ */
+export type ReviewStatus = "draft_review" | "in_review" | "approved" | "rejected" | "archived";
+
+/**
+ * FR-401/403/408: reviewable snapshot of a document's extracted fields.
+ * `content` mirrors `ExtractedContractFields` but stays a free-form record
+ * on the wire (the backend stores it as an untyped JSON column so review
+ * content isn't coupled to the extraction schema).
+ */
+export interface ReviewSummary {
+  id: string;
+  documentId: string;
+  status: ReviewStatus;
+  version: number;
+  content: Record<string, unknown>;
+  rejectionReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * FR-407: one append-only entry per edit/transition (ADR-014/ADR-015).
+ */
+export interface ReviewRevision {
+  id: string;
+  version: number;
+  status: ReviewStatus;
+  content: Record<string, unknown>;
+  actor: string;
+  createdAt: string;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -189,5 +224,103 @@ export class ApiClient {
     }
 
     return await response.blob();
+  }
+
+  /**
+   * FR-408: fetch the current review, if one exists. Resolves `null` when
+   * no review has been started yet (nothing to review is not an error).
+   */
+  async getReview(documentId: string): Promise<ReviewSummary | null> {
+    const response = await fetch(`${this.baseUrl}/documents/${documentId}/review`);
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new ApiError(`Failed to fetch review for ${documentId}: ${response.status}`, response.status);
+    }
+    return (await response.json()) as ReviewSummary;
+  }
+
+  /**
+   * FR-401: start a review (ADR-014: `draft_review`). `content` is
+   * typically seeded from the document's extraction result.
+   */
+  async createReview(documentId: string, content: Record<string, unknown>): Promise<ReviewSummary> {
+    return this.postReviewAction(`${this.baseUrl}/documents/${documentId}/review`, { content }, "POST", 201);
+  }
+
+  /**
+   * FR-405: save an edit without changing status (only legal while
+   * `draft_review`; ADR-014 preserves prior versions via `ReviewRevision`).
+   */
+  async saveDraft(
+    documentId: string,
+    content: Record<string, unknown>,
+    expectedVersion: number
+  ): Promise<ReviewSummary> {
+    return this.postReviewAction(
+      `${this.baseUrl}/documents/${documentId}/review`,
+      { content, expectedVersion },
+      "PATCH"
+    );
+  }
+
+  /** `draft_review -> in_review`. */
+  async submitReview(documentId: string, expectedVersion: number): Promise<ReviewSummary> {
+    return this.postReviewAction(`${this.baseUrl}/documents/${documentId}/review/submit`, { expectedVersion });
+  }
+
+  /** FR-406: `in_review -> approved`. */
+  async approveReview(documentId: string, expectedVersion: number): Promise<ReviewSummary> {
+    return this.postReviewAction(`${this.baseUrl}/documents/${documentId}/review/approve`, { expectedVersion });
+  }
+
+  /** `in_review -> rejected`; a reason is required (ADR-014). */
+  async rejectReview(documentId: string, expectedVersion: number, reason: string): Promise<ReviewSummary> {
+    return this.postReviewAction(`${this.baseUrl}/documents/${documentId}/review/reject`, {
+      expectedVersion,
+      reason,
+    });
+  }
+
+  /** `rejected -> draft_review`: send a rejected review back for edits. */
+  async reviseReview(documentId: string, expectedVersion: number): Promise<ReviewSummary> {
+    return this.postReviewAction(`${this.baseUrl}/documents/${documentId}/review/revise`, { expectedVersion });
+  }
+
+  /** `draft_review|approved|rejected -> archived`. */
+  async archiveReview(documentId: string, expectedVersion: number): Promise<ReviewSummary> {
+    return this.postReviewAction(`${this.baseUrl}/documents/${documentId}/review/archive`, { expectedVersion });
+  }
+
+  /**
+   * FR-407: the append-only sequence of every review edit/transition,
+   * oldest first.
+   */
+  async getReviewHistory(documentId: string): Promise<ReviewRevision[]> {
+    const response = await fetch(`${this.baseUrl}/documents/${documentId}/review/history`);
+    if (!response.ok) {
+      throw new ApiError(`Failed to fetch review history for ${documentId}: ${response.status}`, response.status);
+    }
+    return (await response.json()) as ReviewRevision[];
+  }
+
+  private async postReviewAction(
+    url: string,
+    body: Record<string, unknown>,
+    method: "POST" | "PATCH" = "POST",
+    successStatus = 200
+  ): Promise<ReviewSummary> {
+    const response = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (response.status !== successStatus) {
+      const responseBody = await response.json().catch(() => null);
+      const detail = responseBody && typeof responseBody.detail === "string" ? responseBody.detail : undefined;
+      throw new ApiError(detail ?? `Review action failed: ${response.status}`, response.status);
+    }
+    return (await response.json()) as ReviewSummary;
   }
 }

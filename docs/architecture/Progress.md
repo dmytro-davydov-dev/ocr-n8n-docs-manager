@@ -1,11 +1,11 @@
 # Progress
 
-_Last updated:_ 2026-07-24 (WS-01 frontend: extraction fields panel closing the Phase 3 milestone, plus a backend fix so schema-validation failures are actually queryable through the API instead of only logged)
+_Last updated:_ 2026-07-24 (WS-01 frontend: review workspace UI closing the Phase 4 milestone, plus a backend fix adding the missing `rejected -> draft_review` transition endpoint)
 
 ## Overall Status
 
 - **Current Phase:** Phase 1 – Document Ingestion
-- **Overall Progress:** 45%
+- **Overall Progress:** 48%
 - **Project Status:** 🟢 On Track
 
 ---
@@ -18,7 +18,7 @@ _Last updated:_ 2026-07-24 (WS-01 frontend: extraction fields panel closing the 
 | Phase 1 – Document Ingestion | 🔶 | 80% | [[templates/PRD-Phase-1-Document-Ingestion\|PRD-1]] | — |
 | Phase 2 – OCR Pipeline | 🔶 | 75% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
 | Phase 3 – AI Extraction | 🔶 | 75% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
-| Phase 4 – Contract Review UI | ☐ | 0% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
+| Phase 4 – Contract Review UI | 🔶 | 60% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
 | Phase 5 – Search & RAG | 🔶 | 30% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
 ---
@@ -298,6 +298,45 @@ _Last updated:_ 2026-07-24 (WS-01 frontend: extraction fields panel closing the 
 
 ## In Progress
 
+- WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone
+  ("Full review workspace: edit, save draft, approve, audit trail visible")
+  and most of PRD-Phase-4's FR-401-408. Backend (ADR-014) has had a fully
+  tested review API since WS-02, but no frontend consumed it — this was the
+  single largest gap called out in Technical Debt. Added `ReviewPanel`
+  (`apps/frontend/src/features/documents/ReviewPanel.tsx`), rendered below
+  the extraction panel on `DocumentDetailPage` once a document is
+  `complete`: starts a review seeded from the extraction result, an
+  editable form (parties/dates/monetary values/key clauses/obligations)
+  while `draft_review`, save-draft/submit/approve/reject(with required
+  reason)/archive actions gated by the current status (mirroring
+  ADR-014's `ALLOWED_TRANSITIONS`), a status chip, and an audit-history
+  dialog backed by `GET .../review/history` (FR-407). A 412 version
+  conflict (concurrent edit) surfaces a warning and refetches the latest
+  version rather than silently overwriting it. Added the matching
+  `ReviewSummary`/`ReviewRevision`/`ReviewStatus` types and
+  `getReview`/`createReview`/`saveDraft`/`submitReview`/`approveReview`/
+  `rejectReview`/`reviseReview`/`archiveReview`/`getReviewHistory` methods
+  to `packages/api-client`, and extended the dev-only mock
+  (`mockDocumentsApi.ts`) with a review store that enforces the same
+  transition table as the backend, so the workspace is demoable without a
+  running backend.
+  Investigating "audit trail visible" surfaced a real backend gap (WS-02,
+  fixed in the same pass since the frontend milestone was not fully
+  achievable otherwise): ADR-014's state machine permits
+  `rejected -> draft_review` (send a rejected review back for edits) but no
+  endpoint exposed it — `/review/submit` always targets `in_review`, so a
+  rejected review had no way back to draft through the API. Added
+  `POST /api/documents/{id}/review/revise` (`apps/backend/app/api/reviews.py`,
+  reusing the existing generic `_transition` helper) and extended
+  `test_full_approval_lifecycle` in `test_reviews_api.py` to cover
+  reject -> revise -> edit end to end. Re-exported `openapi.json`
+  (`make export-openapi`) to pick up the new endpoint. Full 44-test backend
+  suite still passes (`make test-backend` via the backend `.venv`).
+  Verified with `tsc -b` and `vite build` (both clean). Could not verify in
+  an actual browser: the Chrome extension used for browser automation was
+  not connected this session (same limitation as the prior WS-01 entry) —
+  the panel's rendering/state-machine behavior is confirmed by the mock's
+  logic and type checks only, not a real click-through.
 - WS-01 Frontend: Phase 3 extraction panel, closing the WS-01 Phase 3
   milestone ("Extraction fields rendered from structured JSON; validation
   errors surfaced"). Added a panel to `DocumentDetailPage` below the
@@ -379,16 +418,25 @@ _Last updated:_ 2026-07-24 (WS-01 frontend: extraction fields panel closing the 
   endpoints now exist but WS-01 owns the decision of when to retire the
   mock and point the frontend at them end-to-end.
 - The `Review`/`ReviewRevision` state machine (ADR-014) was implemented
-  ahead of Phase 2/3 (OCR, extraction) to satisfy WS-02's Done Criteria,
-  since those phases don't exist yet. `POST /api/documents/{id}/review`
-  currently takes a caller-supplied `content` payload as a stand-in for
-  real AI-extracted data; once Phase 3 ships, extraction becomes the seed
-  for the initial draft instead (`review_service.start_review`'s docstring
-  flags this). The review API itself (transitions, optimistic locking,
-  append-only revision history, audit log) is real and fully tested, not
-  a placeholder.
-- No frontend consumes the review endpoints yet — WS-01's UI for this is
-  PRD-Phase-4 (Contract Review UI) scope, not started.
+  ahead of Phase 2/3 (OCR, extraction) to satisfy WS-02's Done Criteria.
+  `POST /api/documents/{id}/review` still takes a caller-supplied `content`
+  payload rather than seeding itself from the document's extraction
+  (`review_service.start_review`'s docstring still flags this as the
+  backend's responsibility to pick up). WS-01's `ReviewPanel` now works
+  around this at the call site — it seeds `createReview` with the
+  extraction result when starting a review — but that's a frontend
+  convention, not a backend guarantee; a caller that skips the UI can still
+  start a review with arbitrary content. The review API itself (transitions,
+  optimistic locking, append-only revision history, audit log) is real and
+  fully tested, not a placeholder.
+- WS-01's `ReviewPanel` (review workspace UI, Phase 4) has not been
+  exercised in an actual browser — the Chrome extension used for browser
+  automation was not connected in either this session or the one that
+  built the extraction panel. Confirmed via `tsc -b`/`vite build` and the
+  mock's own transition-table logic only; needs a real click-through
+  (start review -> edit -> save draft -> submit -> approve/reject -> revise
+  -> archive, plus the 412 conflict path) before Phase 4 can be called
+  visually verified.
 - `packages/api-client/openapi.json` is a generated artifact checked in by
   `make export-openapi`; the hand-written TS client in
   `packages/api-client/src/index.ts` is not yet generated _from_ it (still

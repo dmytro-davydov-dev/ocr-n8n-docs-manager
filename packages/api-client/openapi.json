@@ -1134,6 +1134,59 @@
         ]
       }
     },
+    "/api/documents/{document_id}/review/revise": {
+      "post": {
+        "description": "ADR-014 permits `rejected -> draft_review` (a rejected review goes\nback for edits) but until now no endpoint exposed it -- `/submit` always\ntargets `in_review`, so a rejected review had no way back to draft.",
+        "operationId": "revise_review_api_documents__document_id__review_revise_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewTransitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revise Review",
+        "tags": [
+          "reviews"
+        ]
+      }
+    },
     "/api/documents/{document_id}/review/submit": {
       "post": {
         "operationId": "submit_for_review_api_documents__document_id__review_submit_post",

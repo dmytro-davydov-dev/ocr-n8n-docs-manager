@@ -1,0 +1,119 @@
+{
+  "name": "03 - RAG Chat",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rag-chat",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000301",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "ws04-rag-chat"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"question\": $json.body.question } }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000302",
+      "name": "Call Chat API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000303",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"No indexed, approved content matches this question, or the chat service is unavailable.\" } }}",
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000304",
+      "name": "Respond No Results",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Call Chat API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Chat API": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond No Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "description": "Phase 5 (ADR-020): n8n fronts the backend's retrieval-grounded Q&A as an observable workflow -- query -> POST /api/chat (backend owns retrieval, prompt construction, LLM call, and citation assembly, per ADR-020's 'retrieval and business logic stay in backend services') -> response, with every call logged in n8n's execution history. Unlike 01/02, this workflow calls a public backend endpoint (no Internal API Key credential needed), so it ships active without the manual credential step those require. POST {\"question\": \"...\"} to /webhook/rag-chat; returns the same {answer, citations, model} shape as POST /api/chat directly, or a 404 with an explanatory message if nothing indexed matches (e.g. no approved documents yet) or the chat service errors."
+  },
+  "id": "ws05-03-rag-chat",
+  "tags": [],
+  "active": true
+}

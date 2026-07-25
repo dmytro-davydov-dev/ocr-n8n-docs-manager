@@ -19,7 +19,7 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
 | Phase 2 – OCR Pipeline | 🔶 | 80% | [[templates/PRD-Phase-2-OCR-Pipeline\|PRD-2]] | ADR-010, ADR-011 |
 | Phase 3 – AI Extraction | 🔶 | 80% | [[templates/PRD-Phase-3-AI-Extraction\|PRD-3]] | ADR-012, ADR-013 |
 | Phase 4 – Contract Review UI | 🔶 | 60% | [[templates/PRD-Phase-4-Contract-Review-UI\|PRD-4]] | ADR-014, ADR-015 |
-| Phase 5 – Search & RAG | 🔶 | 70% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
+| Phase 5 – Search & RAG | 🔶 | 75% | [[templates/PRD-Phase-5-Search-and-Knowledge-Base-RAG\|PRD-5]] | ADR-016 to ADR-020 |
 
 ---
 
@@ -431,6 +431,27 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
   this does and doesn't cover, and how the environment was reverted
   afterward.
 
+- Phase 5 (WS-04/ADR-020): added `n8n/workflows/03-rag-chat.json`, an n8n
+  workflow fronting `POST /api/chat` as an observable pipeline step
+  (query -> n8n webhook -> backend retrieval/LLM/citations -> response),
+  per ADR-020's "n8n orchestrates, backend owns retrieval and business
+  logic". Unlike `01`/`02`, it calls a public backend endpoint, so it needs
+  no `Internal API Key` credential to be useful. Validated with the same
+  bar as prior workflow exports -- actually imported into the live n8n
+  instance (`docker compose exec n8n n8n import:workflow --separate
+  --input=/workflows`), not just JSON-parsed; it imported successfully
+  alongside the existing three. Also corrected two stale claims in
+  `n8n/workflows/README.md` found while doing this: it said the `n8n`
+  service doesn't mount `./n8n/workflows` (it does --
+  `./n8n/workflows:/workflows:ro`, and the import runs automatically on
+  every container start per the compose `command:`, not as a manual step),
+  and it attributed auto-deactivation-on-import specifically to missing
+  credentials (confirmed directly: the CLI deactivates every imported
+  workflow regardless). Like `01`/`02`, `03` lands inactive after import
+  and needs a one-time manual reactivation in the n8n UI -- confirmed by
+  hitting the webhook post-import and getting n8n's own "workflow must be
+  active" 404, not a crash or malformed-workflow error.
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone
@@ -678,14 +699,14 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API; Phase 2 reprocessing; stale
   if this recurs, that's the fix; no need to delete `node_modules`/
   `package-lock.json` as the error message itself suggests.
 
-- Phase 5's Search/Chat APIs (`app/services/search_service.py`,
-  `app/services/rag_service.py`) are backend-only: ADR-020 specifies n8n
-  should orchestrate the RAG pipeline (query -> retrieval -> reranking ->
-  prompt -> LLM -> citations -> response) for observability, but no
-  `n8n/workflows/` entry fronts `/api/chat` yet -- it's called directly.
-  There's also no frontend for search/chat (not in Phase 5's PRD scope, so
-  this is expected, not a gap against PRD-5's Acceptance Criteria, but
-  users can only reach these APIs via `curl`/Swagger today). Hybrid
+- ~~No `n8n/workflows/` entry fronts `/api/chat`~~ Resolved:
+  `n8n/workflows/03-rag-chat.json` now does (see Completed, below),
+  imported and validated against the real n8n instance. Still inactive by
+  default pending the same one-time manual reactivation as `01`/`02`
+  (n8n's CLI importer deactivates every workflow it imports). There's also
+  no frontend for search/chat (not in Phase 5's PRD scope, so this is
+  expected, not a gap against PRD-5's Acceptance Criteria, but users can
+  only reach these APIs via `curl`/Swagger/the n8n webhook today). Hybrid
   ranking is a fixed formula (`SEARCH_KEYWORD_WEIGHT`/`SEARCH_VECTOR_WEIGHT`
   applied uniformly); ADR-019's "configurable ranking" is satisfied at the
   weight level, not with pluggable ranking strategies. Vector similarity is

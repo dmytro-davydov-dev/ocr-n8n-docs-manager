@@ -11,7 +11,8 @@ isn't reflected here as drift.
 | --- | --- | --- | --- |
 | `00-internal-api-smoke-test.json` | 0 | Manual | Confirms n8n can reach the backend and the `Internal API Key` credential is authenticated. Run once after standing up a new n8n instance. |
 | `01-document-upload-ingestion.json` | 1 | Webhook (`POST /webhook/document-uploaded`) | Receives `{document_id}` from the backend's upload-trigger callback (`N8N_WEBHOOK_URL`) and calls `POST /api/internal/documents/{id}/process`, which dispatches the full Celery pipeline (validate → OCR → extract → embed) as one chain. |
-| `02-processing-watchdog.json` | 2/3 | Schedule (every 10 min) | Polls `GET /api/documents`, flags documents that are `failed` or stuck in `queued`/`processing` for >15 minutes, and logs them in n8n's execution history for WS-06/operators to act on. Read-only — it does not retry or mutate documents (there is currently no `failed`/`complete` → requeue transition on the backend; see `docs/architecture/Progress.md` Technical Debt). |
+| `02-processing-watchdog.json` | 2/3 | Schedule (every 10 min) | Polls `GET /api/documents`, flags documents that are `failed` or stuck in `queued`/`processing` for >15 minutes, and logs them in n8n's execution history for WS-06/operators to act on. Read-only — it does not retry or mutate documents (a `failed`/`complete` → `queued` transition and `POST /api/internal/documents/{id}/reprocess` now exist on the backend; this workflow still only surfaces stuck documents rather than calling it automatically — see `docs/architecture/Progress.md` Technical Debt). |
+| `03-rag-chat.json` | 5 | Webhook (`POST /webhook/rag-chat`) | Fronts the backend's retrieval-grounded Q&A (`POST /api/chat`) as an observable workflow, per ADR-020: n8n owns orchestration/logging, retrieval + prompt construction + citations stay backend-side. `{"question": "..."}` in, `{answer, citations, model}` out (or 404 if nothing indexed matches). Unlike `01`/`02`, this calls a **public** backend endpoint — no `Internal API Key` credential required. |
 
 Every workflow calls WS-02's internal API only — none of them write to
 application tables or touch the Celery broker directly (ADR-009, WS-04
@@ -30,11 +31,13 @@ Create this credential by hand in the n8n UI (Credentials → New →
 HTTP Header Auth) after import; it is not part of the JSON export and must
 never be committed.
 
-`01` and `02` are exported `active: true`, but n8n auto-deactivates any
-workflow on import if the credential it references doesn't exist yet
+`01`, `02`, and `03` are exported `active: true`, but n8n's CLI importer
+deactivates every workflow it imports regardless of credentials
 ("Deactivating workflow ... Remember to activate later" in the container
-logs) — expected on first boot, before the credential above has been
-created. Create the credential, then reactivate both workflows from the
+logs/CLI output — confirmed directly with `n8n import:workflow`, not just
+inferred). `01`/`02` additionally can't do anything useful until the
+`Internal API Key` credential below exists (`03` doesn't need it — see
+table above). Create the credential if needed, then reactivate from the
 n8n UI (Active toggle) or `n8n update:workflow --active=true --id=<id>`.
 
 ## Importing
@@ -43,9 +46,12 @@ n8n UI (Active toggle) or `n8n update:workflow --active=true --id=<id>`.
 docker compose exec n8n n8n import:workflow --separate --input=/workflows
 ```
 
-(the `n8n` service mounts `documents:/documents`, not this directory — for
-local import, either add a bind mount for `./n8n/workflows:/workflows` or
-import through the n8n UI instead).
+`docker-compose.yml` mounts `./n8n/workflows:/workflows:ro` into the `n8n`
+service and runs this import automatically on every container start
+(`command:` in `docker-compose.yml`), so the committed JSON is the source
+of truth on restart, not a manual step for the compose stack. Only run the
+command above by hand for an out-of-band import (e.g. against a different
+n8n instance).
 
 ## Idempotency
 
@@ -56,3 +62,5 @@ import through the n8n UI instead).
   duplicate run.
 - `02-processing-watchdog`: read-only, so re-running has no side effects
   beyond appearing again in the execution log.
+- `03-rag-chat`: read-only (a question in, an answer out); no state to
+  duplicate on retry.

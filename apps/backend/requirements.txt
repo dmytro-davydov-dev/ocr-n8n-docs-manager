@@ -10,5 +10,12 @@ redis==5.0.8
 httpx==0.27.2
 python-multipart==0.0.12
 pymupdf==1.24.11
+# paddlepaddle imports setuptools at runtime (app/utils/cpp_extension) but
+# doesn't declare it as a dependency; Python 3.12 base images no longer
+# bundle setuptools by default, so without this pin `import paddleocr`
+# fails deep in paddle's import chain with a misleading
+# "ModuleNotFoundError: No module named 'setuptools'" (surfaces in our code
+# as the generic OcrEngineUnavailable from app/services/ocr_engine.py).
+setuptools==75.1.0
 paddleocr==2.9.1
 paddlepaddle==2.6.2

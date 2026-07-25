@@ -573,13 +573,38 @@ _Last updated:_ 2026-07-25 (Phase 5: hybrid Search API and RAG Chat API with cit
   a given environment, a document can still reach `queued` but nothing
   moves it to `processing`/`complete` outside of a test or a manual
   `curl` calling `/process` directly.
-- `paddleocr`/`paddlepaddle` were added to `apps/backend/requirements.txt`
-  per ADR-010 but could not be installed/exercised in this dev shell
-  (native build deps unavailable outside Docker); `PaddleOcrEngine` is
-  implemented with a lazy import specifically so this doesn't block testing,
-  but it has only been verified via `python -m compileall`, not a real OCR
-  run. That needs a pass in the actual `celery-worker` container before
-  Phase 2 can be called done end-to-end.
+- Made a real attempt at exercising `paddleocr` inside the actual
+  `celery-worker` container (this environment's Docker Desktop was
+  running the full stack, unlike prior sessions) and got further than
+  before, but it's still not working end-to-end:
+  1. Uploaded `fixtures/ocr_extraction/sample_contract.pdf` via
+     `POST /api/documents` and drove it through the real pipeline with the
+     new `POST /api/internal/documents/{id}/reprocess` (bypassing the
+     n8n-credential blocker below entirely). It failed immediately with
+     `OCR_ENGINE=paddleocr but the paddleocr package is not installed` --
+     misleading, since `paddleocr` *is* installed; `import paddleocr`
+     actually fails deep in `paddlepaddle`'s own import chain
+     (`paddle.utils.cpp_extension` -> `import setuptools` ->
+     `ModuleNotFoundError`) because paddlepaddle uses `setuptools` at
+     runtime without declaring it as a dependency, and the `python:3.12-slim`
+     base image no longer bundles it. Fixed for real: pinned
+     `setuptools==75.1.0` in `apps/backend/requirements.txt`, rebuilt, and
+     confirmed `import paddleocr` gets past that error.
+  2. With that fixed, `import paddle` **segfaults** (exit 139) on this
+     machine -- confirmed directly with
+     `docker compose exec celery-worker python -c "import paddle"`. This
+     environment is Docker Desktop on Apple Silicon (`uname -m` ->
+     `aarch64`); `paddlepaddle==2.6.2`'s behavior on aarch64 Linux is the
+     suspect, not a Python-level fix. This is a genuinely different, harder
+     problem than "not installed" (a native crash in a pinned third-party
+     ML wheel) and trying paddlepaddle version/build alternatives blindly
+     risked leaving the pinned dependency in a worse, unverified state than
+     documenting the precise failure -- deliberately stopped here rather
+     than guess further. The `setuptools` fix stands regardless (it's a
+     real bug independent of the segfault, and likely unblocks paddleocr
+     entirely on an x86_64 host). Next step for whoever picks this up:
+     reproduce on x86_64, or try a newer `paddlepaddle` release with
+     official aarch64 wheels.
 - `documents.extract_fields` and `documents.generate_embeddings` are
   implemented and unit-tested with fake providers, but neither has been run
   against a real OpenAI-compatible endpoint — `LLM_BASE_URL`/

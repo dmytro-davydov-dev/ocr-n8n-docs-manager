@@ -1,6 +1,6 @@
-# Contract Review MVP
+# Contract Review [MVP](docs/Tech-Glossary.md#mvp)
 
-An AI-assisted contract review application demonstrating a modern document-processing architecture using **React**, **FastAPI**, **Celery**, **n8n**, **PostgreSQL**, **Redis**, OCR, and LLMs.
+An [AI](docs/Tech-Glossary.md#ai)-assisted contract review application demonstrating a modern document-processing architecture using **[React](docs/Tech-Glossary.md#react)**, **[FastAPI](docs/Tech-Glossary.md#fastapi)**, **[Celery](docs/Tech-Glossary.md#celery)**, **[n8n](docs/Tech-Glossary.md#n8n)**, **[PostgreSQL](docs/Tech-Glossary.md#postgresql)**, **[Redis](docs/Tech-Glossary.md#redis)**, [OCR](docs/Tech-Glossary.md#ocr), and [LLMs](docs/Tech-Glossary.md#llm).
 
 The repository is both:
 
@@ -22,6 +22,26 @@ PDF → OCR → Chunking → LLM → Summary
    ↓
 PostgreSQL + Local Storage
 ```
+
+## Architecture at a glance
+
+React ([Vite](docs/Tech-Glossary.md#vite)/TS) talks to FastAPI, which is the only service allowed to write application data. FastAPI hands off long-running work in two ways: it triggers n8n [webhooks](docs/Tech-Glossary.md#webhook) to sequence multi-step workflows, and n8n calls back into FastAPI's authenticated internal [API](docs/Tech-Glossary.md#api) to actually dispatch work. The heavy lifting — OCR, LLM extraction, [chunking](docs/Tech-Glossary.md#chunking), and [embedding](docs/Tech-Glossary.md#embedding) — runs as an [idempotent](docs/Tech-Glossary.md#idempotent) Celery task chain (`validate_file → run_ocr → extract_fields → generate_embeddings`) against Redis as the broker, with PostgreSQL (via the `pgvector` image) and local filesystem storage as the durable state. Per ADR-009, n8n owns sequencing, retries, and external integration visibility but never writes to application tables directly; FastAPI owns validation, auth, and authoritative document/review state; Celery owns the CPU- and I/O-heavy processing itself. [Docker Compose](docs/Tech-Glossary.md#docker-compose) runs the whole stack locally, including n8n's own bootstrap of its internal-API credential and workflow imports on container start.
+
+## End-to-end flow, phase by phase
+
+**Ingestion (Phase 1).** A user uploads a PDF in the React UI, which calls `POST /api/documents`. FastAPI validates the file, hashes and stores it, persists a `Document` row, and calls the `01-document-upload-ingestion` n8n workflow, which in turn calls the internal `POST /api/internal/documents/{id}/process` endpoint to dispatch the Celery chain.
+
+**OCR (Phase 2).** `run_ocr` rasterizes each page with PyMuPDF and runs the configured OCR engine (PaddleOCR by default, swappable via `OCR_ENGINE`), persisting per-page text and confidence scores to `OcrPage` rows, upserted so re-OCR doesn't duplicate. Results are readable via `GET /api/documents/{id}/ocr`.
+
+**AI extraction (Phase 3).** Once OCR completes, `extract_fields` sends the combined page text to the configured LLM provider (any OpenAI-compatible endpoint — OpenAI, Azure OpenAI, Ollama, vLLM) using a versioned [prompt](docs/Tech-Glossary.md#prompt), validates the returned [JSON](docs/Tech-Glossary.md#json) against a Pydantic schema (parties, dates, monetary values, key clauses, obligations), and persists it, exposed via `GET /api/documents/{id}/extraction`. Schema failures are terminal and logged; transport/LLM errors retry.
+
+**Chunking and embedding (feeds Phase 5).** `generate_embeddings` chunks the OCR text with a configurable token limit and overlap, embeds each chunk via the configured embedding provider, and upserts into `chunks` — this runs as soon as extraction finishes, independent of review state.
+
+**Review (Phase 4).** Reviewers open a completed document in the frontend and see the PDF, OCR text, and extracted fields side by side. Edits move the document through an explicit state machine (`draft_review → in_review → approved | rejected → archived`, with `rejected → draft_review` for revisions) backed by optimistic locking and an append-only `ReviewRevision`/[audit-log](docs/Tech-Glossary.md#audit-log) trail, via `/api/documents/{id}/review` and its `submit`/`approve`/`reject`/`revise`/`archive` actions.
+
+**Search & [RAG](docs/Tech-Glossary.md#rag) (Phase 5).** A chunk only becomes searchable once its document's review is `approved` — enforced as a query-time join, not a gate on embedding generation. `GET /api/search` runs [hybrid retrieval](docs/Tech-Glossary.md#hybrid-search) (configurable lexical/vector weighting), and `POST /api/chat` retrieves the same way, builds a context block, and asks the LLM for an answer with citations built directly from the retrieved chunks. The `03-rag-chat` n8n workflow fronts the chat endpoint as an observable pipeline step.
+
+**Resilience.** The `02-processing-watchdog` n8n workflow polls for documents stuck in `queued`/`processing`, and auto-retries `failed` documents (bounded by `DOCUMENT_AUTO_RETRY_MAX`) before surfacing anything that still needs a human via `/api/internal/documents/{id}/auto-retry` and `/reprocess`.
 
 ## Technology
 
@@ -56,7 +76,7 @@ fixtures/
 
 ### Requirements
 
-- Docker Desktop
+- [Docker](docs/Tech-Glossary.md#docker) Desktop
 - Docker Compose
 
 ### Start
@@ -155,6 +175,7 @@ The `postgres` service runs the `pgvector/pgvector:pg16` image with the `vector`
 ### Knowledge Base
 
 - [[docs/MOC.md]]
+- [Tech Glossary](docs/Tech-Glossary.md) — plain-English explanations of OCR, AI, RAG, and other terms used in this project, for non-technical readers.
 
 ### Planning
 
@@ -221,7 +242,7 @@ The `postgres` service runs the `pgvector/pgvector:pg16` image with the `vector`
 
 ## Development Roadmap
 
-| Phase | Description | PRD |
+| Phase | Description | [PRD](docs/Tech-Glossary.md#prd) |
 |-------|-------------|-----|
 | 0 | Foundation | [PRD-0](docs/architecture/templates/PRD-Phase-0-Foundation.md) |
 | 1 | Document Ingestion | [PRD-1](docs/architecture/templates/PRD-Phase-1-Document-Ingestion.md) |

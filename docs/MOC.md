@@ -1,5 +1,9 @@
 # Contract Review MVP — Map of Content
 
+## Reference
+
+- [[Tech-Glossary]] — plain-English explanations of [[Tech-Glossary#OCR|OCR]], [[Tech-Glossary#AI|AI]], [[Tech-Glossary#RAG|RAG]], and other terms used throughout this knowledge base, for non-technical readers.
+
 ## Vision
 
 - [[vision/Vision]]
@@ -10,7 +14,7 @@
 - [[implementation/High-Level-Implementation-Plan]]
 - [[architecture/Progress]]
 
-## Workstreams
+## [[Tech-Glossary#Workstream|Workstreams]]
 
 - [[workstreams/README]]
 - [[workstreams/WS-01-Frontend]]
@@ -43,19 +47,19 @@
 - [[architecture/templates/ADR-008-Celery-for-Background-Processing]]
 - [[architecture/templates/ADR-009-n8n-for-Workflow-Orchestration]]
 
-### OCR & AI
+### [[Tech-Glossary#OCR|OCR]] & [[Tech-Glossary#AI|AI]]
 
 - [[architecture/templates/ADR-010-OCR-Engine-Selection]]
 - [[architecture/templates/ADR-011-OCR-Storage-Strategy]]
 - [[architecture/templates/ADR-012-LLM-Provider-Selection]]
 - [[architecture/templates/ADR-013-Prompt-Management-Strategy]]
 
-### Review & Audit
+### Review & [[Tech-Glossary#Audit Log|Audit]]
 
 - [[architecture/templates/ADR-014-Review-State-Management]]
 - [[architecture/templates/ADR-015-Audit-Logging-Strategy]]
 
-### Search & RAG
+### Search & [[Tech-Glossary#RAG|RAG]]
 
 - [[architecture/templates/ADR-016-Vector-Database-Selection]]
 - [[architecture/templates/ADR-017-Embedding-Model-Strategy]]

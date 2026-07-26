@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "architecture/Progress.md",
+                "file": "vision/Goals.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Progress"
+              "title": "Goals"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "architecture/Progress.md",
+                "file": "vision/Goals.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for Progress"
+              "title": "Backlinks for Goals"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "architecture/Progress.md",
+                "file": "vision/Goals.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from Progress"
+              "title": "Outgoing links from Goals"
             }
           },
           {
@@ -156,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "architecture/Progress.md",
+                "file": "vision/Goals.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Progress"
+              "title": "Outline of Goals"
             }
           }
         ]
@@ -186,9 +186,14 @@
   "active": "46b92acc0af9e7df",
   "lastOpenFiles": [
     "MOC.md",
+    "Tech-Glossary.md",
+    "vision/Vision.md",
+    "vision/Goals.md",
+    "security/README.md",
+    "backend/README.md",
+    "architecture/Progress.md",
     "testing/Test-Strategy.md",
     "testing",
-    "security/README.md",
     "security",
     "database/README.md",
     "database",
@@ -197,12 +202,9 @@
     "architecture/templates/ADR-017-Embedding-Model-Strategy.md",
     "docker/README.md",
     "docker",
-    "backend/README.md",
     "backend",
     "observability/README.md",
     "observability",
-    "vision/Goals.md",
-    "vision/Vision.md",
     "vision"
   ]
 }

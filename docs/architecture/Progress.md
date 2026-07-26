@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated:_ 2026-07-25 (Blockers pass: automated the n8n credential/workflow setup and document auto-retry that were previously manual-only, see below — this pass had no docker/live-stack access, so it's verified at the unit-test/static level, not against a live n8n/docker instance; see each item's own verification note)
+_Last updated:_ 2026-07-26 (Documentation pass: filled in the previously-empty `docs/vision/Vision.md`/`docs/vision/Goals.md`, added `docs/Tech-Glossary.md`, and cross-linked glossary terms into `README.md`/`docs/MOC.md`/Vision/Goals, see below — no code changes.)
 
 ## Overall Status
 
@@ -591,6 +591,35 @@ _Last updated:_ 2026-07-25 (Blockers pass: automated the n8n credential/workflow
   environment. Someone with the stack running needs to run
   `make refresh-ocr-fixture` and review/commit the resulting diff — still the
   lowest-priority open item, this doesn't affect the test suite either way.
+
+- Documentation: filled in `docs/vision/Vision.md` and `docs/vision/Goals.md`
+  (previously empty, broken wiki-links from `docs/MOC.md`). Content was
+  written from the actual PRDs, ADRs, `docs/workstreams/README.md`, and this
+  file, not invented — Vision covers the problem statement, target users,
+  the upload → OCR → AI extraction → review → search/RAG pipeline, and
+  guiding principles (human-in-the-loop, provider independence,
+  contract-first parallelism); Goals covers the north-star goal, a per-phase
+  goals table sourced from each PRD's own Goals/Exit Criteria, and
+  cross-cutting engineering goals. Also added `docs/Tech-Glossary.md`, a
+  plain-language reference (OCR, CV, ML, LLM, RAG, embeddings, chunking,
+  vector database, etc., plus the project's own tools and document types)
+  for non-technical readers, linked from a new "Reference" section in
+  `docs/MOC.md` and from the "Knowledge Base" section of the root
+  `README.md`.
+
+- Documentation: converted `docs/Tech-Glossary.md`'s entries from a table
+  into one heading per term (`### OCR`, `### AI`, etc.) so each definition
+  has a stable anchor, then linked every first occurrence of a glossary term
+  in the four high-level docs (`README.md`, `docs/MOC.md`,
+  `docs/vision/Vision.md`, `docs/vision/Goals.md`) to its glossary entry —
+  Obsidian `[[Tech-Glossary#Term|term]]` links in the wiki-linked docs,
+  standard `[term](docs/Tech-Glossary.md#anchor)` links in `README.md` to
+  keep it renderable on GitHub. Deliberately skipped occurrences inside code
+  spans/fenced blocks (e.g. `` `pgvector` ``, the ASCII architecture diagram)
+  and inside text that was already part of another link's label, and only
+  linked the first occurrence of each term per document rather than every
+  repetition, to avoid link spam in the environment-variable table and
+  elsewhere.
 
 ## In Progress
 

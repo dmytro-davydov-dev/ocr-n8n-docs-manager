@@ -47,7 +47,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// WS-04 Phase 2/3 milestone: observe OCR/extraction completion and\n// failure, and surface documents that need escalation. This is a\n// read-only sequencing/observability check -- it does not retry or\n// mutate any document. There is currently no supported transition back\n// out of 'failed'/'complete' (see Progress.md Technical Debt), so a\n// blind automatic retry here would just be a silent no-op against the\n// internal API; escalation is logged for a human/WS-06 to act on instead.\nconst STALE_THRESHOLD_MS = 15 * 60 * 1000;\nconst now = Date.now();\nconst escalations = [];\n\nfor (const item of $input.all()) {\n  const doc = item.json;\n  const updatedAtMs = new Date(doc.updatedAt).getTime();\n  const isFailed = doc.status === 'failed';\n  const isStuck = (doc.status === 'queued' || doc.status === 'processing') && (now - updatedAtMs) > STALE_THRESHOLD_MS;\n\n  if (isFailed || isStuck) {\n    escalations.push({\n      json: {\n        documentId: doc.id,\n        status: doc.status,\n        errorMessage: doc.errorMessage || null,\n        reason: isFailed ? 'failed' : 'stuck_in_processing',\n        updatedAt: doc.updatedAt,\n      },\n    });\n  }\n}\n\nreturn escalations;\n"
+        "jsCode": "// WS-04 Phase 2/3 milestones: classify documents that need attention.\n// 'failed' documents are routed to the Auto Retry branch below (Progress.md\n// Blockers #4: previously this workflow only surfaced them for a human).\n// Documents stuck in 'queued'/'processing' for >15 minutes are a wedged\n// worker/broker problem that re-dispatching the same pipeline wouldn't fix,\n// so those are still only logged for a human, unchanged.\nconst STALE_THRESHOLD_MS = 15 * 60 * 1000;\nconst now = Date.now();\nconst flagged = [];\n\nfor (const item of $input.all()) {\n  const doc = item.json;\n  const updatedAtMs = new Date(doc.updatedAt).getTime();\n  const isFailed = doc.status === 'failed';\n  const isStuck = (doc.status === 'queued' || doc.status === 'processing') && (now - updatedAtMs) > STALE_THRESHOLD_MS;\n\n  if (isFailed || isStuck) {\n    flagged.push({\n      json: {\n        documentId: doc.id,\n        status: doc.status,\n        errorMessage: doc.errorMessage || null,\n        retryCount: doc.retryCount ?? 0,\n        reason: isFailed ? 'failed' : 'stuck_in_processing',\n        updatedAt: doc.updatedAt,\n      },\n    });\n  }\n}\n\nreturn flagged;\n"
       },
       "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000203",
       "name": "Find Failed or Stuck Documents",
@@ -56,6 +56,82 @@
       "position": [
         680,
         300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000209",
+              "leftValue": "={{ $json.reason }}",
+              "rightValue": "failed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000206",
+      "name": "Is Failed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://backend:8000/api/internal/documents/{{ $json.documentId }}/auto-retry",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000207",
+      "name": "Auto Retry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "internal-api-key",
+          "name": "Internal API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Auto Retry uses neverError, so a 409 (retry budget exhausted, or the\n// document already moved on before this ran) lands here as data, not a\n// workflow failure. Log the outcome either way -- an exhausted document\n// still needs a human, same as before this workflow could auto-retry.\nconst response = $input.item.json;\nconst statusCode = response.statusCode ?? response.status;\nconst body = response.body ?? response;\n\nreturn {\n  json: {\n    documentId: body.document_id ?? body.documentId,\n    statusCode,\n    outcome: statusCode === 202 ? 'retried' : 'retry_budget_exhausted_or_conflict',\n    retryCount: body.retry_count ?? null,\n    detail: body.detail ?? null,\n    at: $now.toISO(),\n  },\n};\n"
+      },
+      "id": "9d6f6f2a-1a1e-4b8a-8b8a-000000000208",
+      "name": "Log Auto Retry Outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        200
       ]
     },
     {
@@ -77,8 +153,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        900,
-        300
+        1120,
+        420
       ]
     }
   ],
@@ -109,7 +185,36 @@
       "main": [
         [
           {
+            "node": "Is Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Failed": {
+      "main": [
+        [
+          {
+            "node": "Auto Retry",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Escalation Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto Retry": {
+      "main": [
+        [
+          {
+            "node": "Log Auto Retry Outcome",
             "type": "main",
             "index": 0
           }
@@ -123,7 +228,7 @@
   },
   "staticData": null,
   "meta": {
-    "description": "WS-04 Phase 2/3 milestones: polls document status via WS-02's API and surfaces failed or stuck-in-processing documents in n8n's execution history (WS-04 Produces: 'execution history/logs useful to WS-06 for tracing processing failures'). Read-only -- no writes, no broker access, no automatic retry (ADR-009; see Progress.md Technical Debt on the missing failed->requeue transition)."
+    "description": "WS-04 Phase 2/3 milestones: polls document status via WS-02's API. 'failed' documents are automatically retried via POST .../auto-retry, bounded by DOCUMENT_AUTO_RETRY_MAX on the backend (Progress.md Blockers #4 -- previously this workflow only surfaced failures for a human). Documents stuck in 'queued'/'processing' for >15 minutes are still only logged in n8n's execution history for a human/WS-06 to act on, since re-dispatching the same pipeline wouldn't fix a wedged worker/broker (ADR-009)."
   },
   "id": "ws04-02-processing-watchdog",
   "tags": [],

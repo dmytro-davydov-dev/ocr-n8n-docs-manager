@@ -32,6 +32,7 @@ services:
       MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-52428800}
       N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/document-uploaded}
       N8N_WEBHOOK_TIMEOUT_SECONDS: ${N8N_WEBHOOK_TIMEOUT_SECONDS:-5}
+      DOCUMENT_AUTO_RETRY_MAX: ${DOCUMENT_AUTO_RETRY_MAX:-3}
       OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
       OCR_RASTERIZE_DPI: ${OCR_RASTERIZE_DPI:-200}
       OCR_MAX_RETRIES: ${OCR_MAX_RETRIES:-3}
@@ -145,7 +146,7 @@ services:
     image: n8nio/n8n:1.71.3
     entrypoint: ["/bin/sh", "-c"]
     command: >
-      "n8n import:workflow --separate --input=/workflows && exec n8n"
+      "sh /docker-entrypoint-n8n/n8n-bootstrap.sh"
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: ${N8N_DB_HOST:-postgres}
@@ -159,10 +160,13 @@ services:
       N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-replace-this-key}
       GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-UTC}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-change-me}
     volumes:
       - n8n_data:/home/node/.n8n
       - documents:/documents
       - ./n8n/workflows:/workflows:ro
+      - ./infra/n8n-bootstrap.sh:/docker-entrypoint-n8n/n8n-bootstrap.sh:ro
+      - ./infra/n8n-credentials.template.json:/docker-entrypoint-n8n/n8n-credentials.template.json:ro
     ports:
       - "5678:5678"
     healthcheck:

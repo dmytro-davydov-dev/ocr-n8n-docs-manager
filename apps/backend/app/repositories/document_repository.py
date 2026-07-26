@@ -101,3 +101,35 @@ def update_status(
     db.commit()
     db.refresh(document)
     return document
+
+
+def reset_retry_count(db: Session, document: Document) -> Document:
+    """Called on an explicit operator-triggered reprocess (POST .../reprocess)
+    -- a deliberate new attempt starts the auto-retry budget over, distinct
+    from the watchdog's automatic ones."""
+    document.retry_count = 0
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+    return document
+
+
+def increment_retry_count(db: Session, document: Document) -> Document:
+    """Called by the watchdog-driven auto-retry path (POST .../auto-retry)
+    each time it re-dispatches a `failed` document, so it can stop once
+    settings.document_auto_retry_max is reached rather than retrying forever."""
+    document.retry_count += 1
+    db.add(document)
+    db.flush()
+
+    audit_repository.record(
+        db,
+        entity_type="document",
+        entity_id=document.id,
+        action="auto_retry",
+        actor="n8n:watchdog",
+        details={"retry_count": document.retry_count},
+    )
+    db.commit()
+    db.refresh(document)
+    return document

@@ -245,6 +245,7 @@ function handleMockUpload(xhr: MockCapableXHR, formData: FormData): void {
         status: "uploaded",
         createdAt: nowIso(),
         updatedAt: nowIso(),
+        retryCount: 0,
       };
       store = [doc, ...store];
       if (file) {

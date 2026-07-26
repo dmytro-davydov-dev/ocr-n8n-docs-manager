@@ -207,6 +207,11 @@
             "title": "Id",
             "type": "string"
           },
+          "retryCount": {
+            "default": 0,
+            "title": "Retrycount",
+            "type": "integer"
+          },
           "sizeBytes": {
             "title": "Sizebytes",
             "type": "integer"
@@ -1420,6 +1425,76 @@
         "summary": "Health",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/internal/documents/{document_id}/auto-retry": {
+      "post": {
+        "description": "Blocker: \"no automated recovery for stuck/failed documents\" -- the n8n\nwatchdog (`02-processing-watchdog.json`) previously only surfaced\n`failed`/stuck documents for a human to `/reprocess` by hand. It now\ncalls this endpoint instead, which applies a bounded auto-retry policy\n(`settings.document_auto_retry_max`) so unattended recovery is possible\nwithout silently retrying forever.\n\nOnly `failed` documents are eligible -- a document stuck in\n`queued`/`processing` for >15 minutes (the watchdog's other alert\ncondition) is a wedged worker/broker problem that re-dispatching the same\nchain wouldn't fix, and calling `/process` again on a document that's\ngenuinely still mid-pipeline risks a second concurrent run; the watchdog\nstill only surfaces those for a human, unchanged.",
+        "operationId": "trigger_document_auto_retry_api_internal_documents__document_id__auto_retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-internal-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      }
+                    ]
+                  },
+                  "title": "Response Trigger Document Auto Retry Api Internal Documents  Document Id  Auto Retry Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Document Auto Retry",
+        "tags": [
+          "internal"
         ]
       }
     },

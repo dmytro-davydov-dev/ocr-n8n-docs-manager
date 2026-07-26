@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated:_ 2026-07-25 (Phase 5 Search/Chat API + native pgvector column; Phase 2 reprocessing + real paddleocr working end-to-end; several real frontend bugs found by code-tracing; multiple infra bugs fixed — all verified against the live docker stack, not just unit tests)
+_Last updated:_ 2026-07-25 (Blockers pass: automated the n8n credential/workflow setup and document auto-retry that were previously manual-only, see below — this pass had no docker/live-stack access, so it's verified at the unit-test/static level, not against a live n8n/docker instance; see each item's own verification note)
 
 ## Overall Status
 
@@ -244,6 +244,17 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API + native pgvector column; Ph
   db), and the full 42-test backend suite (`make test-backend`), all
   passing. Updated the README env var table and `.env.example` with the
   newly-plumbed and newly-added variables.
+
+- Documentation: filled in the seven previously-empty "Technical Areas" pages
+  linked from `docs/MOC.md` (`docs/frontend/README.md`, `docs/backend/README.md`,
+  `docs/docker/README.md`, `docs/database/README.md`, `docs/security/README.md`,
+  `docs/testing/Test-Strategy.md`, `docs/observability/README.md`) — all had
+  existed as empty files/broken wiki-links. Content was written from direct
+  inspection of the actual source (models, routers, `docker-compose.yml`,
+  `Dockerfile`s, `Makefile`, migrations, test files), not guessed, per this
+  file's own standing instruction. `observability/README.md` and
+  `security/README.md` in particular document real, current gaps (no metrics/
+  tracing/log aggregation; no end-user auth) rather than aspirational content.
 
 - WS-06 Quality/Testing/Documentation: closed out the WS-06 Done Criteria.
   Fixed ADR-001 and ADR-002, the only two ADRs still carrying a
@@ -501,6 +512,86 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API + native pgvector column; Ph
   the actual pipeline via `/reprocess` with `OCR_ENGINE=paddleocr`. See
   Technical Debt for the full blow-by-blow.
 
+- n8n upload workflow needed a one-time manual credential setup: scripted the
+  previously-manual n8n bootstrap. Added
+  `infra/n8n-credentials.template.json` (committed, placeholder value only —
+  `__INTERNAL_API_KEY__`) and `infra/n8n-bootstrap.sh`, which the `n8n`
+  service now runs on every container start in place of a bare
+  `n8n import:workflow`: it `sed`s the container's own `INTERNAL_API_KEY` env
+  var into the template, `n8n import:credentials`s it (creating the `Internal
+  API Key` HTTP Header Auth credential the exported workflows reference by id
+  `internal-api-key`), deletes the rendered file, imports the workflows, then
+  explicitly reactivates `01`/`02`/`03` with
+  `n8n update:workflow --active=true --id=<id>` (n8n's CLI importer
+  deactivates every workflow it imports regardless of credentials, confirmed
+  in a prior session's own log output — reactivation was always going to be
+  needed either way). A fresh `docker compose up` should no longer need any
+  hand-created credential or manual reactivation in the n8n UI. Updated
+  `n8n/workflows/README.md` and the docker-compose `n8n` service
+  (`INTERNAL_API_KEY` env + two new read-only volume mounts) to match.
+  **Not verified against a live n8n instance this session** (no docker
+  available in this environment, unlike prior WS-04 sessions that actually
+  imported into a running n8n 1.71.3) — validated at the level this session
+  could reach: the credentials/workflow JSON parse, the shell script passes
+  `sh -n`, and the compose file's structure was checked with `pyyaml`. Next
+  person to run `docker compose up --build` should confirm the `Internal API
+  Key` credential exists and `01`/`02`/`03` are active without touching the
+  n8n UI, then check off the matching item under Verification Follow-ups.
+
+- No automated recovery for stuck/failed documents: added a
+  bounded auto-retry policy instead of the watchdog only surfacing failures.
+  `Document.retry_count` (migration `0009_documents_retry_count`, backfilled
+  0) tracks how many times a document has been auto-retried. New
+  `POST /api/internal/documents/{id}/auto-retry`
+  (`apps/backend/app/api/internal.py`): only acts on `failed` documents,
+  rejects with 409 once `retry_count >= DOCUMENT_AUTO_RETRY_MAX` (new config,
+  default 3, forwarded into the `backend` service's environment/`.env.example`/
+  README table), otherwise increments `retry_count` (audit-logged as
+  `auto_retry`), resets the document to `queued`, and re-dispatches the same
+  idempotent pipeline chain `/reprocess` uses. `/reprocess` (the existing
+  operator-triggered path) now resets `retry_count` back to 0 first — a
+  deliberate manual reprocess is a fresh attempt, not a continuation of the
+  auto-retry budget. Exposed `retryCount` on `DocumentSummary`
+  (backend schema, regenerated `packages/api-client/openapi.json` via
+  `make export-openapi`, `verify-openapi` confirms no drift, and the
+  hand-kept `packages/api-client/src/index.ts` type + `mockDocumentsApi.ts`'s
+  document literal). Rewrote `n8n/workflows/02-processing-watchdog.json`: it
+  still lists `GET /api/documents` and still only *logs* documents stuck in
+  `queued`/`processing` >15 min (re-dispatching wouldn't fix a wedged
+  worker/broker), but `failed` documents now branch through a new `Is Failed`
+  node into an `Auto Retry` HTTP node calling `.../auto-retry`
+  (`neverError`+`fullResponse` so a 409 lands as data, not a failed n8n
+  execution) and a `Log Auto Retry Outcome` code node. 6 new backend tests
+  (`apps/backend/tests/test_internal_processing.py`, 63 total across the
+  suite, all passing via `python3 -m unittest discover` against SQLite —
+  installed the backend's non-paddleocr dependencies directly into this
+  session's Python to run them, no docker needed for this part) cover the
+  retry-count reset, the new endpoint's auth/404/409-wrong-status/dispatch
+  paths, and that the budget is actually enforced (409 with "exhausted" once
+  `DOCUMENT_AUTO_RETRY_MAX` auto-retries have been used). Also ran `tsc -b`
+  clean on the frontend after the `api-client` type change.
+  **Not verified against a live n8n instance** (same no-docker caveat as the
+  n8n bootstrap entry above): the workflow JSON parses and its node graph is
+  internally consistent, but it has not been imported into a real n8n and
+  fired against a real `failed` document. Next person with the stack running
+  should trigger a real failure, let the watchdog's 10-minute schedule (or a
+  manual execution) fire, and confirm `retry_count` increments and the
+  document reaches `queued` again (see Verification Follow-ups).
+
+- paddleocr's real output doesn't match the checked-in golden fixture: added
+  `apps/backend/scripts/refresh_ocr_fixture.py` and
+  `make refresh-ocr-fixture`, which rasterizes `fixtures/ocr_extraction/
+  sample_contract.pdf` the same way `app/tasks/ocr.py` does and runs it
+  through the real `PaddleOcrEngine` (not the fake engine
+  `test_regression_fixtures.py` uses), writing real output to
+  `sample_contract.ocr.json`. This only prepares the tooling — **it has not
+  been run**, since real paddleocr/paddlepaddle need native dependencies
+  (and previously needed three stacked fixes for this project's aarch64 host,
+  see Technical Debt below) that aren't available in this session's
+  environment. Someone with the stack running needs to run
+  `make refresh-ocr-fixture` and review/commit the resulting diff — still the
+  lowest-priority open item, this doesn't affect the test suite either way.
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone
@@ -599,7 +690,59 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API + native pgvector column; Ph
 
 ## Blockers
 
-- None.
+Only items that need a human's own hands (a real browser, a real API key, a
+machine with real paddleocr) are listed here. The n8n manual-credential-setup
+and no-automated-recovery blockers that used to be #1 and #4 are resolved and
+code-complete — see Completed and Technical Debt, above — and are no longer
+listed as blockers; only their live confirmation (run `docker compose up`
+once and watch it happen) is still open, tracked as a `[ ]` under
+Verification Follow-ups below.
+
+1. **The review workspace UI (WS-01 Phase 4 `ReviewPanel`) has never been
+   click-tested in an actual browser.** It's the primary reviewer-facing
+   surface of the MVP (the "Review" in Contract Review MVP), and every prior
+   session lacked a connected Chrome extension — verification has been
+   `tsc -b`/`vite build` and the dev mock's transition logic only. Real
+   rendering/state-machine bugs (start review → edit → save draft → submit →
+   approve/reject → revise → archive, plus the 412 conflict path) could exist
+   undetected. Needs `docker compose up` running plus a connected Chrome
+   extension to click through the full lifecycle against
+   `http://localhost:5173`.
+2. **LLM/embedding output quality is unverified against a real provider.**
+   `OpenAiCompatibleLlmProvider`/`OpenAiCompatibleEmbeddingProvider` have only
+   been exercised against a throwaway local stub that confirms HTTP
+   transport/parsing correctness, never a real OpenAI/Ollama account —
+   extraction accuracy and embedding semantic relevance (the actual AI value
+   proposition of the MVP) are unknown. Needs a real `LLM_API_KEY`/
+   `EMBEDDING_API_KEY` (OpenAI, Azure OpenAI, or a local Ollama with no key
+   needed), `docker compose up`, and a human (or an LLM-as-judge pass,
+   deliberately not built) to judge whether extracted fields/chat answers are
+   actually accurate on a real contract — not something a transport-level
+   test can substitute for.
+3. **paddleocr's real output doesn't match the checked-in golden fixture
+   byte-for-byte** (`fixtures/ocr_extraction/sample_contract.ocr.json`, e.g. a
+   digit/letter OCR artifact). Doesn't affect the test suite (which
+   intentionally tests against a fake engine), but means the fixture isn't a
+   real accuracy baseline — lowest priority of the open items. Run
+   `make refresh-ocr-fixture` on a machine with the real paddleocr/
+   paddlepaddle native deps (the `celery-worker` image already has them) and
+   review/commit the diff.
+
+## Verification Follow-ups
+
+Code-complete, not yet confirmed against a live stack (no docker in the
+session that built them) — quick checks for whoever next runs
+`docker compose up`, not blockers:
+
+- [ ] Fresh `docker compose up --build` creates the `Internal API Key` n8n
+      credential and activates `01`/`02`/`03` without touching the n8n UI;
+      an upload no longer lands in `status: "failed"` /
+      `"Failed to trigger processing workflow"` out of the box
+      (`infra/n8n-bootstrap.sh`).
+- [ ] A real `failed` document gets auto-retried by
+      `02-processing-watchdog.json` (`retry_count` increments, document
+      returns to `queued`), and stops with a 409 once
+      `DOCUMENT_AUTO_RETRY_MAX` is reached.
 
 ## Risks
 
@@ -607,17 +750,17 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API + native pgvector column; Ph
 
 ## Technical Debt
 
-- WS-04's upload workflow (`n8n/workflows/01-document-upload-ingestion.json`)
+- ~~WS-04's upload workflow (`n8n/workflows/01-document-upload-ingestion.json`)
   now exists and is exported `active: true`, but n8n auto-deactivates any
   imported workflow whose referenced credential doesn't exist yet -- so on
   a fresh instance (including a freshly `docker compose up`'d one) it
   imports inactive until an operator manually creates the `Internal API
-  Key` HTTP Header Auth credential in the n8n UI and reactivates it (see
-  `n8n/workflows/README.md`; this is a one-time step, same as any other
-  secret that can't be committed). Until that's done, every upload still
-  ends in `status: "failed"` with
-  `errorMessage: "Failed to trigger processing workflow"`, same symptom as
-  before WS-04 shipped anything -- don't mistake it for a regression.
+  Key` HTTP Header Auth credential in the n8n UI and reactivates it~~
+  Resolved: `infra/n8n-bootstrap.sh` creates the credential from the
+  container's own `INTERNAL_API_KEY` and reactivates `01`/`02`/`03` on every
+  `n8n` container start, so this is no longer a manual step (see
+  `n8n/workflows/README.md`). Not yet confirmed against a live n8n instance
+  this session (no docker available) — see Verification Follow-ups.
 - ~~`apps/frontend/src/mocks/mockDocumentsApi.ts` is still in place, mock
   vs. real backend undecided~~ Resolved: `VITE_ENABLE_API_MOCKS` now
   defaults to `false` (real backend) and is actually forwarded into the
@@ -650,11 +793,12 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API + native pgvector column; Ph
 - WS-03's Celery tasks now have a real dispatcher (WS-04's
   `POST /api/internal/documents/{id}/process`, see WS-04 entry above under
   Completed), but a document only reaches that endpoint via n8n's upload
-  workflow, which needs the `Internal API Key` credential created by hand
-  first (see the WS-04 bullet below). Until that one-time step is done in
-  a given environment, a document can still reach `queued` but nothing
-  moves it to `processing`/`complete` outside of a test or a manual
-  `curl` calling `/process` directly.
+  workflow, which needed the `Internal API Key` credential created by hand
+  first -- as of this session that credential is created automatically by
+  `infra/n8n-bootstrap.sh` (see the resolved bullet above), but kept here
+  until someone confirms live with a real `docker compose up`
+  that a document reaches `processing`/`complete` through the real n8n
+  webhook, not just a manual `curl` calling `/process` directly.
 - ~~`paddleocr` has never been exercised in the actual `celery-worker`
   container~~ Fully resolved, closing the single longest-standing Phase 2
   gap. Three real, distinct bugs stacked on top of each other, each found
@@ -766,11 +910,18 @@ _Last updated:_ 2026-07-25 (Phase 5 Search/Chat API + native pgvector column; Ph
 - ~~The document status state machine had no transition back out of
   `complete`/`failed`~~ Resolved: `complete`/`failed -> queued` is now
   allowed and `POST /api/internal/documents/{id}/reprocess` resets and
-  re-dispatches the pipeline (see Completed, below). The n8n watchdog
+  re-dispatches the pipeline (see Completed, below). ~~The n8n watchdog
   (`n8n/workflows/02-processing-watchdog.json`) still only surfaces stuck
   documents rather than calling this endpoint automatically -- wiring an
   actual auto-retry policy (vs. an operator-triggered one) is still
-  unstarted and deserves its own decision on retry limits/backoff.
+  unstarted and deserves its own decision on retry limits/backoff.~~ Also
+  resolved: the retry-limit decision was a flat cap
+  (`DOCUMENT_AUTO_RETRY_MAX`, default 3), no backoff beyond the watchdog's
+  own 10-minute schedule -- the watchdog now calls
+  `POST .../auto-retry` for `failed` documents instead of only logging them.
+  Stuck `queued`/`processing` documents are still only surfaced, unchanged
+  (re-dispatching the same chain wouldn't fix a wedged worker/broker, unlike
+  a genuinely `failed` document).
 
 - ~~The `backend` image `make test-backend`'s docker-compose fallback path
   runs against is stale~~ Resolved: rebuilt (`docker compose build backend

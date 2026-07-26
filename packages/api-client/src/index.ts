@@ -15,6 +15,9 @@ export interface DocumentSummary {
   createdAt: string;
   updatedAt: string;
   errorMessage?: string;
+  /** Auto-retry attempts the n8n watchdog has made via /auto-retry, capped at
+   * DOCUMENT_AUTO_RETRY_MAX. Reset to 0 on an explicit manual /reprocess. */
+  retryCount: number;
 }
 
 export type UploadProgressHandler = (percent: number) => void;

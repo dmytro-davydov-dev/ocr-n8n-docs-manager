@@ -2,6 +2,7 @@ from celery import chain
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import require_internal_api_key
 from app.repositories import document_repository
@@ -78,9 +79,55 @@ def trigger_document_reprocessing(document_id: str, db: Session = Depends(get_db
             detail=f"Document {document_id} is '{document.status}'; reprocess only applies to 'complete' or 'failed'",
         )
 
+    # An explicit, operator-triggered reprocess is a fresh attempt, not one of
+    # the watchdog's automatic ones -- give it a full auto-retry budget again
+    # rather than letting it inherit whatever auto-retry had already used.
+    document = document_repository.reset_retry_count(db, document)
     document = document_repository.update_status(db, document, new_status="queued", actor="api:reprocess")
     result = _dispatch_pipeline(document_id)
     return {"document_id": document_id, "task_id": result.id}
+
+
+@router.post("/documents/{document_id}/auto-retry", status_code=status.HTTP_202_ACCEPTED)
+def trigger_document_auto_retry(document_id: str, db: Session = Depends(get_db)) -> dict[str, str | int]:
+    """Blocker: "no automated recovery for stuck/failed documents" -- the n8n
+    watchdog (`02-processing-watchdog.json`) previously only surfaced
+    `failed`/stuck documents for a human to `/reprocess` by hand. It now
+    calls this endpoint instead, which applies a bounded auto-retry policy
+    (`settings.document_auto_retry_max`) so unattended recovery is possible
+    without silently retrying forever.
+
+    Only `failed` documents are eligible -- a document stuck in
+    `queued`/`processing` for >15 minutes (the watchdog's other alert
+    condition) is a wedged worker/broker problem that re-dispatching the same
+    chain wouldn't fix, and calling `/process` again on a document that's
+    genuinely still mid-pipeline risks a second concurrent run; the watchdog
+    still only surfaces those for a human, unchanged.
+    """
+    document = document_repository.get(db, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    if document.status != "failed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Document {document_id} is '{document.status}'; auto-retry only applies to 'failed'",
+        )
+
+    if document.retry_count >= settings.document_auto_retry_max:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Document {document_id} has exhausted its auto-retry budget "
+                f"({document.retry_count}/{settings.document_auto_retry_max}); "
+                "needs a manual /reprocess or investigation"
+            ),
+        )
+
+    document = document_repository.increment_retry_count(db, document)
+    document = document_repository.update_status(db, document, new_status="queued", actor="api:auto-retry")
+    result = _dispatch_pipeline(document_id)
+    return {"document_id": document_id, "task_id": result.id, "retry_count": document.retry_count}
 
 
 @router.post("/documents/{document_id}/reindex", status_code=status.HTTP_202_ACCEPTED)

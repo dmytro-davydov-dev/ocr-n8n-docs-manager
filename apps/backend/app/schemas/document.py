@@ -22,6 +22,7 @@ class DocumentSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     error_message: str | None = None
+    retry_count: int = 0
 
 
 class DocumentStatusUpdate(BaseModel):

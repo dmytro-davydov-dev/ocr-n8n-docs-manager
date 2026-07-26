@@ -32,3 +32,19 @@ Per the WS-06 Risks table ("Regression fixtures become stale"): update
 LLM provider, prompt version, or the pipeline's persisted schema — never
 let the checked-in expectation silently diverge from what the pipeline
 actually does today.
+
+`sample_contract.ocr.json` was captured from the fake engine
+`test_regression_fixtures.py` uses, not real `paddleocr` — its text doesn't
+byte-for-byte match what real paddleocr produces (Progress.md Blockers #5,
+e.g. a digit/letter artifact like `$5,ooo.00`). Regenerate it from a real
+paddleocr run with:
+
+```bash
+make refresh-ocr-fixture
+```
+
+(`apps/backend/scripts/refresh_ocr_fixture.py`, run inside the
+`celery-worker` container since that's the image with the real
+paddleocr/paddlepaddle native dependencies proven to work.) Review the diff
+before committing — this is a deliberate, reviewed update, same as any other
+fixture refresh, not a rubber-stamped overwrite.

@@ -1,6 +1,6 @@
 COMPOSE ?= docker compose
 
-.PHONY: up down reset logs verify-phase0 verify-infra test-backend-auth test-backend export-openapi verify-openapi
+.PHONY: up down reset logs verify-phase0 verify-infra test-backend-auth test-backend export-openapi verify-openapi refresh-ocr-fixture
 
 up:
 	$(COMPOSE) up --build
@@ -66,3 +66,12 @@ verify-openapi:
 	else \
 		$(COMPOSE) run --rm backend python scripts/check_openapi_drift.py; \
 	fi
+
+# Blockers #5: regenerate fixtures/ocr_extraction/sample_contract.ocr.json
+# from a real paddleocr run instead of the fake engine tests use. Needs the
+# real paddleocr/paddlepaddle native deps, which only celery-worker's image
+# is guaranteed to have (see requirements.txt's aarch64 segfault comments) --
+# always runs through that container, unlike test-backend/export-openapi's
+# local-Python fast path.
+refresh-ocr-fixture:
+	$(COMPOSE) run --rm celery-worker python scripts/refresh_ocr_fixture.py

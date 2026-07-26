@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, String, func
+from sqlalchemy import BigInteger, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -24,6 +24,13 @@ class Document(Base):
     storage_path: Mapped[str] = mapped_column(String(length=1024), nullable=False)
     status: Mapped[str] = mapped_column(String(length=32), nullable=False, default="uploaded", index=True)
     error_message: Mapped[str | None] = mapped_column(String(length=2048), nullable=True)
+    # Blocker: "no automated recovery for stuck/failed documents" -- counts
+    # auto-retries the watchdog (n8n `02-processing-watchdog`) has triggered
+    # via POST /api/internal/documents/{id}/auto-retry, capped at
+    # settings.document_auto_retry_max. Reset to 0 whenever an operator
+    # explicitly reprocesses a document (POST .../reprocess), since that's a
+    # deliberate new attempt, not another automatic one.
+    retry_count: Mapped[int] = mapped_column(Integer(), nullable=False, default=0, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

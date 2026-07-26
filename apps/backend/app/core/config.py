@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     n8n_webhook_url: str | None = Field(default=None, alias="N8N_WEBHOOK_URL")
     n8n_webhook_timeout_seconds: float = Field(default=5.0, alias="N8N_WEBHOOK_TIMEOUT_SECONDS")
 
+    # Blockers #4 ("no automated recovery for stuck/failed documents"): cap on
+    # how many times the watchdog (n8n `02-processing-watchdog`) may
+    # auto-retry a `failed` document via POST .../auto-retry before it must
+    # stop and only surface the document for a human, same as before.
+    document_auto_retry_max: int = Field(default=3, alias="DOCUMENT_AUTO_RETRY_MAX")
+
     # WS-03: OCR engine is swappable via config only (ADR-010, WS-03 Done Criteria).
     # "paddleocr" is the ADR-010 default; "null" is a no-op engine for environments
     # without the (heavy) paddleocr/paddlepaddle dependencies installed.

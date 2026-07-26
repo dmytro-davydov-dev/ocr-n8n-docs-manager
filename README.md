@@ -110,6 +110,7 @@ Copy `.env.example` to `.env` and adjust values as needed.
 | VITE_ENABLE_API_MOCKS | Dev-only mock of WS-02's `/documents` endpoints (Phase 1) until they ship; set to `false` once real endpoints exist | true |
 | N8N_WEBHOOK_URL | Webhook the backend calls after upload to trigger the n8n ingestion workflow (WS-04) | <http://n8n:5678/webhook/document-uploaded> |
 | N8N_WEBHOOK_TIMEOUT_SECONDS | Timeout for the upload-trigger webhook call | 5 |
+| DOCUMENT_AUTO_RETRY_MAX | Max automatic retries the n8n watchdog (`02-processing-watchdog`) will trigger for a `failed` document via `/auto-retry` before it stops and surfaces it for a human | 3 |
 | N8N_DB_HOST | n8n PostgreSQL host | postgres |
 | N8N_DB_PORT | n8n PostgreSQL port | 5432 |
 | N8N_DB_NAME | n8n PostgreSQL database name | n8n |

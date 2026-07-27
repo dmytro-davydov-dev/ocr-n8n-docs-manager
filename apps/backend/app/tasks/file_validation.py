@@ -7,7 +7,10 @@ processed downstream (ADR-008: "validating or inspecting uploaded files").
 
 import logging
 
+from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
+
 from app.celery_app import celery_app
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.storage import storage
 from app.repositories import document_repository
@@ -40,12 +43,20 @@ def _inspect_pdf(content: bytes) -> None:
         raise TerminalValidationError(f"PDF failed to parse: {exc}") from exc
 
 
-@celery_app.task(name="documents.validate_file", bind=True, max_retries=3, default_retry_delay=10)
+@celery_app.task(
+    name="documents.validate_file",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=10,
+    soft_time_limit=settings.validate_file_soft_time_limit_seconds,
+    time_limit=settings.validate_file_time_limit_seconds,
+)
 def validate_file(self, document_id: str) -> str:
     """Identifiers only in the payload (ADR-008) — the file itself is loaded
     from shared storage. Idempotent: only acts on documents in 'queued';
     duplicate delivery after a document has already moved on is a no-op."""
     db = SessionLocal()
+    document = None
     try:
         document = document_repository.get(db, document_id)
         if document is None:
@@ -64,7 +75,22 @@ def validate_file(self, document_id: str) -> str:
             content = storage.read(document.storage_path)
         except OSError as exc:
             logger.warning("validate_file: transient storage read failure for %s: %s", document_id, exc)
-            raise self.retry(exc=exc)
+            try:
+                raise self.retry(exc=exc)
+            except MaxRetriesExceededError:
+                logger.error(
+                    "validate_file: storage read failed for %s after %s retries, marking failed",
+                    document_id,
+                    self.max_retries,
+                )
+                document_repository.update_status(
+                    db,
+                    document,
+                    new_status="failed",
+                    actor="celery:validate_file",
+                    error_message=f"Storage read failed after {self.max_retries} retries: {exc}",
+                )
+                return "failed"
 
         try:
             _inspect_pdf(content)
@@ -83,5 +109,19 @@ def validate_file(self, document_id: str) -> str:
             db, document, new_status="processing", actor="celery:validate_file"
         )
         return "processing"
+    except SoftTimeLimitExceeded:
+        logger.error("validate_file: soft time limit exceeded for %s", document_id)
+        if document is not None and document.status == "queued":
+            document_repository.update_status(
+                db,
+                document,
+                new_status="failed",
+                actor="celery:validate_file",
+                error_message=(
+                    f"validate_file exceeded its {settings.validate_file_soft_time_limit_seconds}s "
+                    "time limit"
+                ),
+            )
+        return "failed"
     finally:
         db.close()

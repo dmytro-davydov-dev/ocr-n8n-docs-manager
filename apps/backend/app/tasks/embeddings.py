@@ -6,7 +6,10 @@ via the configured provider (ADR-017).
 
 import logging
 
+from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
+
 from app.celery_app import celery_app
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.repositories import chunk_repository, document_repository, ocr_repository
 from app.services import embedding_service
@@ -21,7 +24,14 @@ from app.services.embedding_provider import (
 logger = logging.getLogger("app.tasks.embeddings")
 
 
-@celery_app.task(name="documents.generate_embeddings", bind=True, max_retries=3, default_retry_delay=15)
+@celery_app.task(
+    name="documents.generate_embeddings",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=15,
+    soft_time_limit=settings.generate_embeddings_soft_time_limit_seconds,
+    time_limit=settings.generate_embeddings_time_limit_seconds,
+)
 def generate_embeddings(self, document_id: str, provider: EmbeddingProvider | None = None) -> str:
     """Identifiers only in the payload (ADR-008); `provider` is a test-only
     injection seam. Idempotent: chunking is deterministic given the same OCR
@@ -66,7 +76,28 @@ def generate_embeddings(self, document_id: str, provider: EmbeddingProvider | No
                     chunk.chunk_index,
                     exc,
                 )
-                raise self.retry(exc=exc)
+                try:
+                    raise self.retry(exc=exc)
+                except MaxRetriesExceededError:
+                    # document.status stays 'complete' by design (OCR-stage
+                    # only, see ALLOWED_TRANSITIONS) -- record via audit
+                    # trail instead, same as extraction failures.
+                    logger.error(
+                        "generate_embeddings: failed for %s chunk %s after %s retries, giving up",
+                        document_id,
+                        chunk.chunk_index,
+                        self.max_retries,
+                    )
+                    embedding_service.record_failure(
+                        db,
+                        document_id=document_id,
+                        reason=(
+                            f"Embedding failed on chunk {chunk.chunk_index} after "
+                            f"{self.max_retries} retries: {exc}"
+                        ),
+                        actor="celery:generate_embeddings",
+                    )
+                    return "embedding_failed"
 
             embedding_service.record_chunk(
                 db,
@@ -94,5 +125,17 @@ def generate_embeddings(self, document_id: str, provider: EmbeddingProvider | No
             actor="celery:generate_embeddings",
         )
         return "embedded"
+    except SoftTimeLimitExceeded:
+        logger.error("generate_embeddings: soft time limit exceeded for %s", document_id)
+        embedding_service.record_failure(
+            db,
+            document_id=document_id,
+            reason=(
+                f"generate_embeddings exceeded its "
+                f"{settings.generate_embeddings_soft_time_limit_seconds}s time limit"
+            ),
+            actor="celery:generate_embeddings",
+        )
+        return "embedding_failed"
     finally:
         db.close()

@@ -183,6 +183,18 @@
       "DocumentSummary": {
         "description": "Mirrors `DocumentSummary` in packages/api-client/src/index.ts \u2014 the\nOpenAPI contract that WS-01's frontend is generated/mocked against.",
         "properties": {
+          "archivedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archivedat"
+          },
           "createdAt": {
             "format": "date-time",
             "title": "Createdat",
@@ -667,8 +679,20 @@
     },
     "/api/documents": {
       "get": {
-        "description": "FR-107/108: list all documents and their current status.",
+        "description": "FR-107/108: list documents and their current status. Archived\ndocuments are hidden by default (?includeArchived=true to show them).",
         "operationId": "list_documents_api_documents_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "includeArchived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Includearchived",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -683,6 +707,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Documents",
@@ -769,6 +803,49 @@
           }
         },
         "summary": "Get Document",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/documents/{document_id}/archive": {
+      "post": {
+        "description": "Soft-remove a document from the default documents list. Independent\nof processing status -- see document_repository.archive.",
+        "operationId": "archive_document_api_documents__document_id__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive Document",
         "tags": [
           "documents"
         ]
@@ -1400,6 +1477,48 @@
         "summary": "Submit For Review",
         "tags": [
           "reviews"
+        ]
+      }
+    },
+    "/api/documents/{document_id}/unarchive": {
+      "post": {
+        "operationId": "unarchive_document_api_documents__document_id__unarchive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unarchive Document",
+        "tags": [
+          "documents"
         ]
       }
     },

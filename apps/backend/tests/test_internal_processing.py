@@ -1,9 +1,10 @@
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -12,6 +13,7 @@ from app.core.database import get_db
 from app.core.storage import LocalDocumentStorage
 from app.main import app
 from app.models import Base
+from app.models.document import Document
 from app.repositories import document_repository
 import app.services.document_service as document_service_module
 
@@ -161,6 +163,44 @@ class InternalProcessingTriggerTest(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 409)
+
+    def test_reprocess_unsticks_a_stale_processing_document(self) -> None:
+        """A document wedged in 'processing' past the stuck threshold (e.g.
+        a task that hit its Celery time limit -- see app/tasks/ocr.py) can
+        be force-reprocessed by an operator, unlike one still genuinely
+        mid-pipeline (test_reprocess_rejects_document_mid_pipeline)."""
+        document_id = self._upload()
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            document = document_repository.get(db, document_id)
+            document_repository.update_status(db, document, new_status="queued", actor="test")
+            document_repository.update_status(db, document, new_status="processing", actor="test")
+
+            stale_at = datetime.now(timezone.utc) - timedelta(
+                minutes=settings.document_stuck_threshold_minutes + 1
+            )
+            db.execute(update(Document).where(Document.id == document_id).values(updated_at=stale_at))
+            db.commit()
+        finally:
+            db.close()
+
+        fake_result = MagicMock(id="task-unstick")
+        with patch("app.api.internal.chain") as mock_chain:
+            mock_chain.return_value.apply_async.return_value = fake_result
+
+            response = self.client.post(
+                f"/api/internal/documents/{document_id}/reprocess",
+                headers={"x-internal-api-key": settings.internal_api_key},
+            )
+
+        self.assertEqual(response.status_code, 202)
+        mock_chain.return_value.apply_async.assert_called_once()
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            self.assertEqual(document_repository.get(db, document_id).status, "queued")
+        finally:
+            db.close()
 
     def test_reprocess_resets_retry_count(self) -> None:
         document_id = self._upload()

@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated:_ 2026-07-26 (Documentation pass: filled in the previously-empty `docs/vision/Vision.md`/`docs/vision/Goals.md`, added `docs/Tech-Glossary.md`, and cross-linked glossary terms into `README.md`/`docs/MOC.md`/Vision/Goals, see below — no code changes.)
+_Last updated:_ 2026-07-26 (Bugfix: documents wedged in `processing` forever — no Celery time limits + unhandled `MaxRetriesExceededError`; see below.)
 
 ## Overall Status
 
@@ -621,6 +621,72 @@ _Last updated:_ 2026-07-26 (Documentation pass: filled in the previously-empty `
   repetition, to avoid link spam in the environment-variable table and
   elsewhere.
 
+- Bugfix: documents stuck in `processing` forever (reported via a UI
+  screenshot showing a document go `failed` -> `processing` and never
+  resolve). Root cause was two stacked gaps in `apps/backend/app/tasks/`,
+  both named as risks in ADR-008 but never actually closed: (1) every task's
+  `raise self.retry(exc=exc)` call, once `max_retries` is exhausted, makes
+  Celery raise `MaxRetriesExceededError` instead of retrying — none of the
+  four tasks caught it, so the exception just killed the task without ever
+  persisting a terminal `failed` status, leaving the document's row wedged
+  at whatever status it was last written to (usually `processing`, set by
+  `validate_file` right before `run_ocr` hit the exhausted-retry path); (2)
+  no task had a Celery `time_limit`/`soft_time_limit` configured at all, so
+  a genuinely hung call (e.g. an OCR engine call that never returns and
+  never raises) produced no exception for anything to catch, meaning even
+  the fix for (1) couldn't help. The watchdog (`02-processing-watchdog.json`)
+  deliberately never auto-heals `queued`/`processing` — by design, a wedged
+  worker isn't fixed by re-dispatching the same chain — so there was no
+  automated recovery path once a document landed here.
+  Fixed both: `validate_file`/`run_ocr`/`extract_fields`/`generate_embeddings`
+  now catch `MaxRetriesExceededError` at every `self.retry()` call site and
+  persist a terminal outcome (`failed` for `validate_file`/`run_ocr`, which
+  run while `document.status == 'processing'`; an audit-trail-only failure
+  via `extraction_service.record_extraction_failure`/new
+  `embedding_service.record_failure` for `extract_fields`/
+  `generate_embeddings`, which run while `document.status == 'complete'` and
+  have no `complete -> failed` edge in `ALLOWED_TRANSITIONS` by design — see
+  existing `validation_failed` handling for the same reason). Added
+  `soft_time_limit`/`time_limit` to all four tasks (new
+  `*_SOFT_TIME_LIMIT_SECONDS`/`*_TIME_LIMIT_SECONDS` settings, forwardable
+  via env) and a `SoftTimeLimitExceeded` handler in each with the same
+  terminal-outcome split as above.
+  Even with both fixed going forward, a document already wedged from before
+  this fix (or one that gets wedged for an unrelated infra reason later) had
+  no supported way out: `/reprocess` only accepted `complete`/`failed`, and
+  a document stuck in `queued`/`processing` isn't either. Added
+  `processing -> queued` to `ALLOWED_TRANSITIONS` and extended
+  `POST /api/internal/documents/{id}/reprocess` to accept `queued`/
+  `processing` too, but only once the document has been sitting there
+  longer than the watchdog's own stuck-detection window (new
+  `DOCUMENT_STUCK_THRESHOLD_MINUTES` setting, default 15, deliberately
+  mirroring `02-processing-watchdog.json`'s hardcoded `STALE_THRESHOLD_MS`)
+  — a document still genuinely mid-pipeline within that window is rejected
+  with 409, same as before, so this can't double-dispatch a real in-flight
+  run.
+  Exposed this to the frontend: added
+  `POST /api/documents/{id}/reprocess` (`apps/backend/app/api/documents.py`,
+  same rules as the internal endpoint, reusing its `_dispatch_pipeline`/
+  `_minutes_since_update` helpers) since the browser shouldn't hold
+  `INTERNAL_API_KEY`, added `ApiClient.reprocessDocument` to
+  `packages/api-client`, and added a "Reprocess" button next to
+  Archive/Unarchive in `DocumentList.tsx` for any non-archived document.
+  7 new/updated backend tests (`test_internal_processing.py`, 79 total
+  across the suite — installed the backend's non-paddleocr deps directly
+  into this session's Python to run the full suite, no docker available)
+  cover the exhausted-retry-vs-terminal-failure split is unaffected, the new
+  `processing -> queued` staleness gate (both the 409-while-fresh and the
+  succeeds-once-stale paths), and retry-count reset. Verified `tsc -b`
+  clean on the frontend after the `api-client`/`DocumentList.tsx` changes.
+  **Not verified against a live stack** (no docker in this session) — the
+  reported document was already wedged before this fix landed and needs a
+  manual `/reprocess` (now clearable via the new staleness override, or the
+  UI button) once the rebuilt `celery-worker` image is running; a genuinely
+  new upload hitting a transient OCR/LLM/embedding failure repeatedly should
+  now surface as `failed` (or an audit-logged extraction/embedding failure)
+  within its task's time limit instead of hanging, but this hasn't been
+  exercised against real paddleocr/LLM/embedding providers this session.
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone
@@ -772,6 +838,13 @@ session that built them) — quick checks for whoever next runs
       `02-processing-watchdog.json` (`retry_count` increments, document
       returns to `queued`), and stops with a 409 once
       `DOCUMENT_AUTO_RETRY_MAX` is reached.
+- [ ] After rebuilding `celery-worker` with the `processing`-stuck-forever
+      fix (see Completed), confirm a real OCR/LLM/embedding transient
+      failure that exhausts its retries actually lands as `failed` (or an
+      audit-logged extraction/embedding failure) rather than hanging, and
+      that a document already wedged from before the fix can be cleared via
+      `POST .../reprocess` (internal or the new public/UI path) once past
+      `DOCUMENT_STUCK_THRESHOLD_MINUTES`.
 
 ## Risks
 

@@ -31,6 +31,13 @@ class Document(Base):
     # explicitly reprocesses a document (POST .../reprocess), since that's a
     # deliberate new attempt, not another automatic one.
     retry_count: Mapped[int] = mapped_column(Integer(), nullable=False, default=0, server_default="0")
+    # Soft-remove-from-list: set when a user archives a document from the
+    # documents table. Deliberately a separate column rather than an
+    # "archived" value on `status` -- `status` drives the processing state
+    # machine (ALLOWED_TRANSITIONS) and pipeline dispatch; archiving is a
+    # display/visibility concern that shouldn't require touching that
+    # machine or coupling reprocess/auto-retry eligibility to it.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

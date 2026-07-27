@@ -35,6 +35,28 @@ def record_chunk(
     db.commit()
 
 
+def record_failure(
+    db: Session,
+    *,
+    document_id: str,
+    reason: str,
+    actor: str,
+) -> None:
+    """Mirrors extraction_service.record_extraction_failure: document.status
+    stays 'complete' (it tracks the OCR stage only -- see
+    document_repository.ALLOWED_TRANSITIONS), so a terminal embedding
+    failure is recorded to the audit trail rather than silently dropped."""
+    audit_repository.record(
+        db,
+        entity_type="document",
+        entity_id=document_id,
+        action="embeddings_failed",
+        actor=actor,
+        details={"reason": reason},
+    )
+    db.commit()
+
+
 def record_completion(
     db: Session,
     *,

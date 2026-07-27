@@ -18,6 +18,9 @@ export interface DocumentSummary {
   /** Auto-retry attempts the n8n watchdog has made via /auto-retry, capped at
    * DOCUMENT_AUTO_RETRY_MAX. Reset to 0 on an explicit manual /reprocess. */
   retryCount: number;
+  /** Set when a user archives the document from the documents list (soft
+   * remove, independent of `status`). `null`/absent means not archived. */
+  archivedAt?: string | null;
 }
 
 export type UploadProgressHandler = (percent: number) => void;
@@ -122,15 +125,62 @@ export class ApiClient {
   }
 
   /**
-   * FR-108: list documents and their current status.
+   * FR-108: list documents and their current status. Archived documents are
+   * excluded by default.
    */
-  async listDocuments(): Promise<DocumentSummary[]> {
-    const response = await fetch(`${this.baseUrl}/documents`);
+  async listDocuments(options?: { includeArchived?: boolean }): Promise<DocumentSummary[]> {
+    const query = options?.includeArchived ? "?includeArchived=true" : "";
+    const response = await fetch(`${this.baseUrl}/documents${query}`);
     if (!response.ok) {
       throw new ApiError(`Failed to list documents: ${response.status}`, response.status);
     }
 
     return (await response.json()) as DocumentSummary[];
+  }
+
+  /**
+   * Soft-remove a document from the default documents list. Independent of
+   * processing status -- an in-flight or failed document can be archived
+   * too, it just stops showing up in the list.
+   */
+  async archiveDocument(id: string): Promise<DocumentSummary> {
+    const response = await fetch(`${this.baseUrl}/documents/${id}/archive`, { method: "POST" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const detail = body && typeof body.detail === "string" ? body.detail : undefined;
+      throw new ApiError(detail ?? `Failed to archive document ${id}: ${response.status}`, response.status);
+    }
+    return (await response.json()) as DocumentSummary;
+  }
+
+  /**
+   * Restore a previously archived document to the default documents list.
+   */
+  async unarchiveDocument(id: string): Promise<DocumentSummary> {
+    const response = await fetch(`${this.baseUrl}/documents/${id}/unarchive`, { method: "POST" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const detail = body && typeof body.detail === "string" ? body.detail : undefined;
+      throw new ApiError(detail ?? `Failed to unarchive document ${id}: ${response.status}`, response.status);
+    }
+    return (await response.json()) as DocumentSummary;
+  }
+
+  /**
+   * Reset a `complete`/`failed` document to `queued` and re-dispatch the
+   * processing pipeline, or force-unstick one wedged in `queued`/
+   * `processing` past the backend's staleness grace period (see
+   * app.api.documents.reprocess_document). A 409 means it's either archived
+   * or still genuinely within that grace period.
+   */
+  async reprocessDocument(id: string): Promise<DocumentSummary> {
+    const response = await fetch(`${this.baseUrl}/documents/${id}/reprocess`, { method: "POST" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const detail = body && typeof body.detail === "string" ? body.detail : undefined;
+      throw new ApiError(detail ?? `Failed to reprocess document ${id}: ${response.status}`, response.status);
+    }
+    return (await response.json()) as DocumentSummary;
   }
 
   /**

@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from app.api.internal import _dispatch_pipeline, _minutes_since_update
+from app.core.config import settings
 from app.core.database import get_db
 from app.repositories import (
     audit_repository,
@@ -40,9 +42,13 @@ async def upload_document(file: UploadFile, db: Session = Depends(get_db)) -> Do
 
 
 @router.get("", response_model=list[DocumentSummary])
-def list_documents(db: Session = Depends(get_db)) -> list[DocumentSummary]:
-    """FR-107/108: list all documents and their current status."""
-    documents = document_repository.list_all(db)
+def list_documents(
+    include_archived: bool = Query(False, alias="includeArchived"),
+    db: Session = Depends(get_db),
+) -> list[DocumentSummary]:
+    """FR-107/108: list documents and their current status. Archived
+    documents are hidden by default (?includeArchived=true to show them)."""
+    documents = document_repository.list_all(db, include_archived=include_archived)
     return [DocumentSummary.model_validate(doc) for doc in documents]
 
 
@@ -52,6 +58,77 @@ def get_document(document_id: str, db: Session = Depends(get_db)) -> DocumentSum
     document = document_repository.get(db, document_id)
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    return DocumentSummary.model_validate(document)
+
+
+@router.post("/{document_id}/archive", response_model=DocumentSummary)
+def archive_document(document_id: str, db: Session = Depends(get_db)) -> DocumentSummary:
+    """Soft-remove a document from the default documents list. Independent
+    of processing status -- see document_repository.archive."""
+    document = document_repository.get(db, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    try:
+        document = document_repository.archive(db, document, actor="api:archive")
+    except document_repository.DocumentAlreadyArchived as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return DocumentSummary.model_validate(document)
+
+
+@router.post("/{document_id}/unarchive", response_model=DocumentSummary)
+def unarchive_document(document_id: str, db: Session = Depends(get_db)) -> DocumentSummary:
+    document = document_repository.get(db, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    try:
+        document = document_repository.unarchive(db, document, actor="api:archive")
+    except document_repository.DocumentNotArchived as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return DocumentSummary.model_validate(document)
+
+
+@router.post("/{document_id}/reprocess", response_model=DocumentSummary, status_code=status.HTTP_202_ACCEPTED)
+def reprocess_document(document_id: str, db: Session = Depends(get_db)) -> DocumentSummary:
+    """Public counterpart to `app.api.internal.trigger_document_reprocessing`
+    (n8n/operator-only, gated behind INTERNAL_API_KEY) -- lets the frontend's
+    "Reprocess" action (DocumentList.tsx) reset a `complete`/`failed`
+    document, or force-unstick one wedged in `queued`/`processing` past
+    `DOCUMENT_STUCK_THRESHOLD_MINUTES`, without the browser needing to hold
+    the internal API key. Same rules as the internal endpoint apply; see its
+    docstring for the full contract."""
+    document = document_repository.get(db, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    if document.archived_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Document {document_id} is archived; unarchive it before reprocessing",
+        )
+
+    if document.status in ("queued", "processing"):
+        age_minutes = _minutes_since_update(document)
+        if age_minutes < settings.document_stuck_threshold_minutes:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Document {document_id} is '{document.status}' and was updated "
+                    f"{age_minutes:.1f} minutes ago, within the "
+                    f"{settings.document_stuck_threshold_minutes}-minute grace period a pipeline "
+                    "run is allowed -- wait, or confirm it's genuinely wedged, before forcing a reprocess"
+                ),
+            )
+    elif document.status not in ("complete", "failed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Document {document_id} is '{document.status}'; reprocess does not apply",
+        )
+
+    document = document_repository.reset_retry_count(db, document)
+    document = document_repository.update_status(db, document, new_status="queued", actor="api:reprocess")
+    _dispatch_pipeline(document_id)
     return DocumentSummary.model_validate(document)
 
 

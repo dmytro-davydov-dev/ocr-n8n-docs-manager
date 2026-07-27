@@ -5,6 +5,8 @@ results (ADR-011) via the service layer as they complete.
 
 import logging
 
+from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
+
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -16,7 +18,14 @@ from app.services.ocr_engine import OcrEngine, OcrEngineUnavailable, get_ocr_eng
 logger = logging.getLogger("app.tasks.ocr")
 
 
-@celery_app.task(name="documents.run_ocr", bind=True, max_retries=settings.ocr_max_retries, default_retry_delay=15)
+@celery_app.task(
+    name="documents.run_ocr",
+    bind=True,
+    max_retries=settings.ocr_max_retries,
+    default_retry_delay=15,
+    soft_time_limit=settings.ocr_soft_time_limit_seconds,
+    time_limit=settings.ocr_time_limit_seconds,
+)
 def run_ocr(self, document_id: str, engine: OcrEngine | None = None) -> str:
     """Identifiers only in the payload (ADR-008); `engine` is a test-only
     injection seam and is never passed when the task is dispatched over
@@ -24,6 +33,7 @@ def run_ocr(self, document_id: str, engine: OcrEngine | None = None) -> str:
     page write is an upsert, so a retried/duplicated run overwrites rather
     than duplicates prior pages (ADR-008, ADR-011)."""
     db = SessionLocal()
+    document = None
     try:
         document = document_repository.get(db, document_id)
         if document is None:
@@ -44,7 +54,22 @@ def run_ocr(self, document_id: str, engine: OcrEngine | None = None) -> str:
             content = storage.read(document.storage_path)
         except OSError as exc:
             logger.warning("run_ocr: transient storage read failure for %s: %s", document_id, exc)
-            raise self.retry(exc=exc)
+            try:
+                raise self.retry(exc=exc)
+            except MaxRetriesExceededError:
+                logger.error(
+                    "run_ocr: storage read failed for %s after %s retries, marking failed",
+                    document_id,
+                    self.max_retries,
+                )
+                document_repository.update_status(
+                    db,
+                    document,
+                    new_status="failed",
+                    actor="celery:run_ocr",
+                    error_message=f"Storage read failed after {self.max_retries} retries: {exc}",
+                )
+                return "failed"
 
         try:
             active_engine = engine or get_ocr_engine()
@@ -95,7 +120,26 @@ def run_ocr(self, document_id: str, engine: OcrEngine | None = None) -> str:
                         page_index + 1,
                         exc,
                     )
-                    raise self.retry(exc=exc)
+                    try:
+                        raise self.retry(exc=exc)
+                    except MaxRetriesExceededError:
+                        logger.error(
+                            "run_ocr: engine failed for %s page %s after %s retries, marking failed",
+                            document_id,
+                            page_index + 1,
+                            self.max_retries,
+                        )
+                        document_repository.update_status(
+                            db,
+                            document,
+                            new_status="failed",
+                            actor="celery:run_ocr",
+                            error_message=(
+                                f"OCR engine failed on page {page_index + 1} after "
+                                f"{self.max_retries} retries: {exc}"
+                            ),
+                        )
+                        return "failed"
 
                 ocr_service.record_page(
                     db,
@@ -111,5 +155,18 @@ def run_ocr(self, document_id: str, engine: OcrEngine | None = None) -> str:
 
         document_repository.update_status(db, document, new_status="complete", actor="celery:run_ocr")
         return "complete"
+    except SoftTimeLimitExceeded:
+        logger.error("run_ocr: soft time limit exceeded for %s", document_id)
+        if document is not None and document.status == "processing":
+            document_repository.update_status(
+                db,
+                document,
+                new_status="failed",
+                actor="celery:run_ocr",
+                error_message=(
+                    f"run_ocr exceeded its {settings.ocr_soft_time_limit_seconds}s time limit"
+                ),
+            )
+        return "failed"
     finally:
         db.close()

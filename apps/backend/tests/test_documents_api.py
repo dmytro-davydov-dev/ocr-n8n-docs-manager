@@ -154,6 +154,86 @@ class DocumentsApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
 
+    def test_archive_hides_document_from_default_list(self) -> None:
+        uploaded = self._upload().json()
+
+        archive_response = self.client.post(f"/api/documents/{uploaded['id']}/archive")
+        self.assertEqual(archive_response.status_code, 200)
+        self.assertIsNotNone(archive_response.json()["archivedAt"])
+
+        list_response = self.client.get("/api/documents")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json(), [])
+
+        list_with_archived = self.client.get("/api/documents?includeArchived=true")
+        self.assertEqual(list_with_archived.status_code, 200)
+        self.assertEqual(len(list_with_archived.json()), 1)
+        self.assertIsNotNone(list_with_archived.json()[0]["archivedAt"])
+
+    def test_archive_is_independent_of_processing_status(self) -> None:
+        """Archiving doesn't touch `status` -- a mid-pipeline document (still
+        `queued` here, since the workflow trigger is mocked) can be archived
+        without going through document_repository.ALLOWED_TRANSITIONS."""
+        uploaded = self._upload().json()
+        self.assertEqual(uploaded["status"], "queued")
+
+        response = self.client.post(f"/api/documents/{uploaded['id']}/archive")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "queued")
+        self.assertIsNotNone(response.json()["archivedAt"])
+
+    def test_archive_twice_conflicts(self) -> None:
+        uploaded = self._upload().json()
+        self.client.post(f"/api/documents/{uploaded['id']}/archive")
+
+        response = self.client.post(f"/api/documents/{uploaded['id']}/archive")
+
+        self.assertEqual(response.status_code, 409)
+
+    def test_archive_unknown_document_returns_404(self) -> None:
+        response = self.client.post("/api/documents/does-not-exist/archive")
+        self.assertEqual(response.status_code, 404)
+
+    def test_unarchive_restores_document_to_default_list(self) -> None:
+        uploaded = self._upload().json()
+        self.client.post(f"/api/documents/{uploaded['id']}/archive")
+
+        unarchive_response = self.client.post(f"/api/documents/{uploaded['id']}/unarchive")
+        self.assertEqual(unarchive_response.status_code, 200)
+        self.assertIsNone(unarchive_response.json()["archivedAt"])
+
+        list_response = self.client.get("/api/documents")
+        self.assertEqual(len(list_response.json()), 1)
+
+    def test_unarchive_when_not_archived_conflicts(self) -> None:
+        uploaded = self._upload().json()
+
+        response = self.client.post(f"/api/documents/{uploaded['id']}/unarchive")
+
+        self.assertEqual(response.status_code, 409)
+
+    def test_archived_document_cannot_be_reprocessed_or_auto_retried(self) -> None:
+        uploaded = self._upload().json()
+        headers = {"x-internal-api-key": settings.internal_api_key}
+        self.client.patch(
+            f"/api/internal/documents/{uploaded['id']}/status",
+            json={"status": "processing"},
+            headers=headers,
+        )
+        self.client.patch(
+            f"/api/internal/documents/{uploaded['id']}/status",
+            json={"status": "failed", "errorMessage": "boom"},
+            headers=headers,
+        )
+        self.client.post(f"/api/documents/{uploaded['id']}/archive")
+
+        reprocess = self.client.post(f"/api/internal/documents/{uploaded['id']}/reprocess", headers=headers)
+        self.assertEqual(reprocess.status_code, 409)
+
+        auto_retry = self.client.post(f"/api/internal/documents/{uploaded['id']}/auto-retry", headers=headers)
+        self.assertEqual(auto_retry.status_code, 409)
+
 
 if __name__ == "__main__":
     unittest.main()

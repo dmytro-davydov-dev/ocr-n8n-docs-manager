@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,16 +14,33 @@ from app.repositories import audit_repository
 # task is already idempotent (upsert-by-key, re-checks current status), so
 # resetting to `queued` and re-dispatching the same chain is safe and just
 # overwrites prior OCR/extraction/chunk rows rather than duplicating them.
+#
+# `processing`/`queued` -> `queued` is the same reprocess reset applied to a
+# document the watchdog flagged as stuck (Progress.md: "processing"/"queued"
+# for >15 minutes is a wedged worker/broker problem the watchdog only
+# surfaces for a human -- see 02-processing-watchdog.json). Without this edge
+# an operator who has confirmed a document is genuinely wedged had no
+# supported way to clear it: /reprocess only accepted `complete`/`failed`, so
+# a document stuck mid-pipeline could never be reset. The pipeline's tasks
+# are idempotent for the same reason `complete`/`failed` -> `queued` is safe.
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "uploaded": {"queued", "failed"},
     "queued": {"processing", "failed"},
-    "processing": {"complete", "failed"},
+    "processing": {"complete", "failed", "queued"},
     "complete": {"queued"},
     "failed": {"queued"},
 }
 
 
 class InvalidStatusTransition(ValueError):
+    pass
+
+
+class DocumentAlreadyArchived(ValueError):
+    pass
+
+
+class DocumentNotArchived(ValueError):
     pass
 
 
@@ -65,8 +84,10 @@ def get(db: Session, document_id: str) -> Document | None:
     return db.get(Document, document_id)
 
 
-def list_all(db: Session) -> list[Document]:
+def list_all(db: Session, *, include_archived: bool = False) -> list[Document]:
     stmt = select(Document).order_by(Document.created_at.desc())
+    if not include_archived:
+        stmt = stmt.where(Document.archived_at.is_(None))
     return list(db.scalars(stmt).all())
 
 
@@ -97,6 +118,52 @@ def update_status(
         action="status_changed",
         actor=actor,
         details={"from": previous_status, "to": new_status, "error_message": error_message},
+    )
+    db.commit()
+    db.refresh(document)
+    return document
+
+
+def archive(db: Session, document: Document, *, actor: str) -> Document:
+    """Soft-remove a document from the default list view. Deliberately
+    independent of `status`/`ALLOWED_TRANSITIONS`: archiving doesn't change
+    where a document is in the processing pipeline, it just hides it, so any
+    status (including mid-pipeline) can be archived."""
+    if document.archived_at is not None:
+        raise DocumentAlreadyArchived(f"Document {document.id} is already archived")
+
+    document.archived_at = datetime.now(timezone.utc)
+    db.add(document)
+    db.flush()
+
+    audit_repository.record(
+        db,
+        entity_type="document",
+        entity_id=document.id,
+        action="archived",
+        actor=actor,
+        details={"status": document.status},
+    )
+    db.commit()
+    db.refresh(document)
+    return document
+
+
+def unarchive(db: Session, document: Document, *, actor: str) -> Document:
+    if document.archived_at is None:
+        raise DocumentNotArchived(f"Document {document.id} is not archived")
+
+    document.archived_at = None
+    db.add(document)
+    db.flush()
+
+    audit_repository.record(
+        db,
+        entity_type="document",
+        entity_id=document.id,
+        action="unarchived",
+        actor=actor,
+        details={"status": document.status},
     )
     db.commit()
     db.refresh(document)

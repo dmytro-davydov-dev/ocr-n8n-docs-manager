@@ -85,6 +85,17 @@ class ReviewsApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
 
+    def test_create_review_blocked_when_document_archived(self) -> None:
+        document_id = self._complete_document()
+        self.client.post(f"/api/documents/{document_id}/archive")
+
+        response = self.client.post(
+            f"/api/documents/{document_id}/review",
+            json={"content": {"clause_1": "text"}},
+        )
+
+        self.assertEqual(response.status_code, 409)
+
     def test_create_review_succeeds_once_complete(self) -> None:
         document_id = self._complete_document()
 

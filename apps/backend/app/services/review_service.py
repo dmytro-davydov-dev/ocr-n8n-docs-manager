@@ -16,6 +16,8 @@ def start_review(db: Session, document: Document, *, actor: str, content: dict[s
     review (WS-03's OCR/extraction output). Until Phase 2/3 ship, `content`
     is caller-supplied; once extraction exists, this becomes the seed for
     the initial draft (ADR-014: AI Extracted -> Draft Review)."""
+    if document.archived_at is not None:
+        raise DocumentNotReady(f"Document {document.id} is archived and cannot be reviewed")
     if document.status != "complete":
         raise DocumentNotReady(
             f"Document {document.id} is not ready for review (status: '{document.status}')"

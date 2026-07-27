@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from celery import chain
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -54,6 +56,13 @@ def trigger_document_processing(document_id: str, db: Session = Depends(get_db))
     return {"document_id": document_id, "task_id": result.id}
 
 
+def _minutes_since_update(document) -> float:
+    updated_at = document.updated_at
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - updated_at).total_seconds() / 60
+
+
 @router.post("/documents/{document_id}/reprocess", status_code=status.HTTP_202_ACCEPTED)
 def trigger_document_reprocessing(document_id: str, db: Session = Depends(get_db)) -> dict[str, str]:
     """Reprocess a `complete` or `failed` document (e.g. after fixing an OCR
@@ -63,20 +72,44 @@ def trigger_document_reprocessing(document_id: str, db: Session = Depends(get_db
     (ADR-011 anticipated reprocessing as a benefit of page-level OCR
     storage) -- see document_repository.ALLOWED_TRANSITIONS. Resets the
     document to `queued` (an explicit, audited transition) and re-dispatches
-    the same chain used for first-time processing."""
+    the same chain used for first-time processing.
+
+    Also doubles as the operator-driven unstick path for a document the
+    watchdog has flagged as wedged in `queued`/`processing`
+    (Progress.md Blockers #4 follow-up: "no automated recovery for
+    stuck/failed documents" covered `failed` via auto-retry, but a document
+    stuck mid-pipeline had no supported recovery at all -- see
+    document_repository.ALLOWED_TRANSITIONS). That path is gated on the same
+    `DOCUMENT_STUCK_THRESHOLD_MINUTES` staleness window the watchdog
+    (`02-processing-watchdog.json`) uses to flag it in the first place, so a
+    document that's genuinely still mid-pipeline can't be yanked out from
+    under itself into a second, redundant chain."""
     document = document_repository.get(db, document_id)
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # update_status() treats a same-status write as a no-op rather than an
-    # error (used elsewhere for idempotency), so a document already
-    # `queued`/`processing` must be rejected explicitly here -- otherwise a
-    # duplicate reprocess call while a pipeline run is already in flight
-    # would silently kick off a second, redundant chain.
-    if document.status not in ("complete", "failed"):
+    if document.archived_at is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Document {document_id} is '{document.status}'; reprocess only applies to 'complete' or 'failed'",
+            detail=f"Document {document_id} is archived; unarchive it before reprocessing",
+        )
+
+    if document.status in ("queued", "processing"):
+        age_minutes = _minutes_since_update(document)
+        if age_minutes < settings.document_stuck_threshold_minutes:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Document {document_id} is '{document.status}' and was updated "
+                    f"{age_minutes:.1f} minutes ago, within the "
+                    f"{settings.document_stuck_threshold_minutes}-minute grace period a pipeline "
+                    "run is allowed -- wait, or confirm it's genuinely wedged, before forcing a reprocess"
+                ),
+            )
+    elif document.status not in ("complete", "failed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Document {document_id} is '{document.status}'; reprocess does not apply",
         )
 
     # An explicit, operator-triggered reprocess is a fresh attempt, not one of
@@ -107,6 +140,12 @@ def trigger_document_auto_retry(document_id: str, db: Session = Depends(get_db))
     document = document_repository.get(db, document_id)
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    if document.archived_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Document {document_id} is archived; unarchive it before retrying",
+        )
 
     if document.status != "failed":
         raise HTTPException(

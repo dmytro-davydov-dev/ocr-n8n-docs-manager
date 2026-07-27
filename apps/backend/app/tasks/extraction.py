@@ -6,9 +6,11 @@ into schema-validated structured JSON via the configured LLM provider
 import json
 import logging
 
+from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
 from pydantic import ValidationError
 
 from app.celery_app import celery_app
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.repositories import document_repository, extraction_repository, ocr_repository
 from app.schemas.extraction import ExtractedContractFields
@@ -24,7 +26,14 @@ from app.services.prompts import load_contract_extraction_prompt
 logger = logging.getLogger("app.tasks.extraction")
 
 
-@celery_app.task(name="documents.extract_fields", bind=True, max_retries=3, default_retry_delay=15)
+@celery_app.task(
+    name="documents.extract_fields",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=15,
+    soft_time_limit=settings.extract_fields_soft_time_limit_seconds,
+    time_limit=settings.extract_fields_time_limit_seconds,
+)
 def extract_fields(self, document_id: str, provider: LlmProvider | None = None) -> str:
     """Identifiers only in the payload (ADR-008); `provider` is a test-only
     injection seam. Idempotent: only acts on documents that are 'complete'
@@ -74,7 +83,27 @@ def extract_fields(self, document_id: str, provider: LlmProvider | None = None) 
             )
         except LlmTransientError as exc:
             logger.warning("extract_fields: transient LLM failure for %s: %s", document_id, exc)
-            raise self.retry(exc=exc)
+            try:
+                raise self.retry(exc=exc)
+            except MaxRetriesExceededError:
+                # Note: document.status stays 'complete' here by design -- it
+                # tracks the OCR stage only (see ALLOWED_TRANSITIONS, which
+                # has no 'complete' -> 'failed' edge). Record the terminal
+                # failure the same way a schema-validation failure is
+                # recorded below, so it's visible via the audit trail /
+                # extraction API instead of silently vanishing.
+                logger.error(
+                    "extract_fields: LLM failed for %s after %s retries, giving up",
+                    document_id,
+                    self.max_retries,
+                )
+                extraction_service.record_extraction_failure(
+                    db,
+                    document_id=document_id,
+                    reason=f"LLM extraction failed after {self.max_retries} retries: {exc}",
+                    actor="celery:extract_fields",
+                )
+                return "extraction_failed"
 
         try:
             parsed = json.loads(completion.raw_content)
@@ -106,5 +135,14 @@ def extract_fields(self, document_id: str, provider: LlmProvider | None = None) 
             actor="celery:extract_fields",
         )
         return "extracted"
+    except SoftTimeLimitExceeded:
+        logger.error("extract_fields: soft time limit exceeded for %s", document_id)
+        extraction_service.record_extraction_failure(
+            db,
+            document_id=document_id,
+            reason=f"extract_fields exceeded its {settings.extract_fields_soft_time_limit_seconds}s time limit",
+            actor="celery:extract_fields",
+        )
+        return "extraction_failed"
     finally:
         db.close()

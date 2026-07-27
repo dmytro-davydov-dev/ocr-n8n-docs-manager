@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     # auto-retry a `failed` document via POST .../auto-retry before it must
     # stop and only surface the document for a human, same as before.
     document_auto_retry_max: int = Field(default=3, alias="DOCUMENT_AUTO_RETRY_MAX")
+    # Mirrors the STALE_THRESHOLD_MS the watchdog workflow
+    # (n8n/workflows/02-processing-watchdog.json) uses to flag a document
+    # stuck in `queued`/`processing` for a human. /reprocess uses the same
+    # threshold to gate its `queued`/`processing` -> `queued` override, so an
+    # operator can only force-reset a document once it's old enough to
+    # actually be wedged rather than genuinely mid-pipeline.
+    document_stuck_threshold_minutes: int = Field(default=15, alias="DOCUMENT_STUCK_THRESHOLD_MINUTES")
 
     # WS-03: OCR engine is swappable via config only (ADR-010, WS-03 Done Criteria).
     # "paddleocr" is the ADR-010 default; "null" is a no-op engine for environments
@@ -44,6 +51,20 @@ class Settings(BaseSettings):
     ocr_engine: str = Field(default="paddleocr", alias="OCR_ENGINE")
     ocr_rasterize_dpi: int = Field(default=200, alias="OCR_RASTERIZE_DPI")
     ocr_max_retries: int = Field(default=3, alias="OCR_MAX_RETRIES")
+
+    # ADR-008 named "tasks remain stuck" as a risk to mitigate with time
+    # limits; none were previously configured, so a hang inside a task (e.g.
+    # an OCR engine call that never returns and never raises) never produced
+    # an exception for the task to handle -- the document just stayed
+    # 'processing' forever with no automated way out. `soft_*` raises
+    # `SoftTimeLimitExceeded` inside the task so it gets a chance to persist
+    # a terminal failure state before the hard limit kills the worker child.
+    validate_file_soft_time_limit_seconds: int = Field(
+        default=30, alias="VALIDATE_FILE_SOFT_TIME_LIMIT_SECONDS"
+    )
+    validate_file_time_limit_seconds: int = Field(default=45, alias="VALIDATE_FILE_TIME_LIMIT_SECONDS")
+    ocr_soft_time_limit_seconds: int = Field(default=300, alias="OCR_SOFT_TIME_LIMIT_SECONDS")
+    ocr_time_limit_seconds: int = Field(default=330, alias="OCR_TIME_LIMIT_SECONDS")
 
     # WS-03 Phase 3: LLM provider is a single OpenAI-compatible HTTP client
     # (ADR-012 — Ollama/vLLM/Azure OpenAI all speak this API), so switching
@@ -54,6 +75,10 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
     llm_timeout_seconds: float = Field(default=60.0, alias="LLM_TIMEOUT_SECONDS")
     llm_max_retries: int = Field(default=3, alias="LLM_MAX_RETRIES")
+    extract_fields_soft_time_limit_seconds: int = Field(
+        default=90, alias="EXTRACT_FIELDS_SOFT_TIME_LIMIT_SECONDS"
+    )
+    extract_fields_time_limit_seconds: int = Field(default=120, alias="EXTRACT_FIELDS_TIME_LIMIT_SECONDS")
 
     # WS-03 Phase 5: embedding provider follows the same OpenAI-compatible
     # pattern as the LLM provider (ADR-017).
@@ -63,6 +88,12 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="text-embedding-3-small", alias="EMBEDDING_MODEL")
     embedding_timeout_seconds: float = Field(default=30.0, alias="EMBEDDING_TIMEOUT_SECONDS")
     embedding_max_retries: int = Field(default=3, alias="EMBEDDING_MAX_RETRIES")
+    generate_embeddings_soft_time_limit_seconds: int = Field(
+        default=180, alias="GENERATE_EMBEDDINGS_SOFT_TIME_LIMIT_SECONDS"
+    )
+    generate_embeddings_time_limit_seconds: int = Field(
+        default=210, alias="GENERATE_EMBEDDINGS_TIME_LIMIT_SECONDS"
+    )
     # ADR-016: native pgvector column dimension. Must match whatever
     # `embedding_model` actually produces (1536 for text-embedding-3-small,
     # the default) -- pgvector enforces this at the database level, so a

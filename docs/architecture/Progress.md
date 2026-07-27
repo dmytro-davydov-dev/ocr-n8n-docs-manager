@@ -687,6 +687,49 @@ _Last updated:_ 2026-07-26 (Bugfix: documents wedged in `processing` forever —
   within its task's time limit instead of hanging, but this hasn't been
   exercised against real paddleocr/LLM/embedding providers this session.
 
+- Bugfix follow-up: the `processing`-stuck-forever fix above (task-level
+  `MaxRetriesExceededError`/`SoftTimeLimitExceeded` handling) turned out not
+  to be the whole story. Reprocessing the reported document with the fix
+  deployed still got stuck in `processing` again; `docker compose logs
+  celery-worker` showed why: `Process 'ForkPoolWorker-1' pid:8 exited with
+  'signal 9 (SIGKILL)'` / `WorkerLostError('Worker exited prematurely:
+  signal 9 (SIGKILL)')` during `run_ocr`, right after `PaddleOcrEngine`
+  downloaded its det/rec/cls models (paddleocr's lazy first-use
+  initialization, `app/services/ocr_engine.py`) — almost certainly the OOM
+  killer (or the `WORKER_MEMORY_LIMIT` cgroup limit, default 4G) killing the
+  worker child mid-model-load/inference. SIGKILL can't be caught in Python,
+  so no amount of task-level `try`/`except` (the fix above included) can
+  ever run for this — the process is gone before any of that code executes.
+  Worse, `celery_app.py` never configured `task_acks_late`, so Celery's
+  default (ack on receipt, before execution) meant the task message was
+  already gone from the broker by the time the child was killed: nothing
+  ever re-attempted it, so the document was stranded with zero further
+  activity, indistinguishable from a hang from the API's perspective.
+  Fixed the part that's actually fixable in code: added
+  `task_acks_late=True` + `task_reject_on_worker_lost=True` +
+  `worker_prefetch_multiplier=1` to `celery_app.py`, so a worker killed
+  mid-task now gets its message requeued for another attempt instead of
+  silently dropped — safe since every pipeline task already re-checks the
+  document's current status before acting (ADR-008/009 idempotency).
+  Also added a `paddleocr_cache` volume for `celery-worker` at
+  `/root/.paddleocr` (`docker-compose.yml`) — without it, every container
+  recreate (including the ones this exact crash triggers) throws away the
+  downloaded models and forces a full re-download on the next OCR task,
+  adding avoidable time/network/memory pressure on top of whatever caused
+  the crash. The underlying memory pressure itself is a host/infra decision,
+  not something this session could fix: whoever runs the stack next should
+  raise `WORKER_MEMORY_LIMIT` (`.env`, default 4G) and confirm Docker
+  Desktop's own VM memory allocation has headroom above that, or set
+  `OCR_ENGINE=null` temporarily to validate the rest of the pipeline
+  (extraction, embeddings, review) independent of paddleocr's footprint.
+  Full 72-test backend suite still passes after the `celery_app.py` change;
+  `docker-compose.yml` validated with `pyyaml`. **Not verified against a
+  live worker actually surviving a real OOM this session** (no docker
+  available) — next person should reproduce the SIGKILL, confirm the task
+  gets redelivered (celery-worker logs should show the same task id picked
+  up again rather than the document just sitting there), and confirm
+  whether raising `WORKER_MEMORY_LIMIT` actually lets `run_ocr` complete.
+
 ## In Progress
 
 - WS-01 Frontend: review workspace UI, closing the WS-01 Phase 4 milestone

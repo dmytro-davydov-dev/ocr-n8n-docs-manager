@@ -100,6 +100,14 @@ services:
       CHUNK_OVERLAP_TOKENS: ${CHUNK_OVERLAP_TOKENS:-50}
     volumes:
       - documents:/documents
+      # PaddleOcrEngine (app/services/ocr_engine.py) downloads its det/rec/cls
+      # models to ~/.paddleocr on first use, lazily, inside the task itself.
+      # Without this, every container recreate (e.g. after a crash -- see the
+      # task_acks_late comment in app/celery_app.py) throws that cache away
+      # and re-downloads ~100-200MB of models from scratch on the very next
+      # OCR task, adding real time/network/memory pressure on top of
+      # whatever caused the crash in the first place.
+      - paddleocr_cache:/root/.paddleocr
     deploy:
       resources:
         limits:
@@ -182,3 +190,4 @@ volumes:
   postgres_data:
   n8n_data:
   documents:
+  paddleocr_cache:

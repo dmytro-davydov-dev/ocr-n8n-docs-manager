@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "vision/Goals.md",
+                "file": "MOC.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Goals"
+              "title": "MOC"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "vision/Goals.md",
+                "file": "MOC.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for Goals"
+              "title": "Backlinks for MOC"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "vision/Goals.md",
+                "file": "MOC.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from Goals"
+              "title": "Outgoing links from MOC"
             }
           },
           {
@@ -156,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "vision/Goals.md",
+                "file": "MOC.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Goals"
+              "title": "Outline of MOC"
             }
           }
         ]
@@ -185,26 +185,26 @@
   },
   "active": "46b92acc0af9e7df",
   "lastOpenFiles": [
-    "MOC.md",
-    "Tech-Glossary.md",
     "vision/Vision.md",
     "vision/Goals.md",
-    "security/README.md",
-    "backend/README.md",
-    "architecture/Progress.md",
+    "vision",
     "testing/Test-Strategy.md",
     "testing",
+    "security/README.md",
     "security",
-    "database/README.md",
-    "database",
-    "frontend/README.md",
-    "frontend",
-    "architecture/templates/ADR-017-Embedding-Model-Strategy.md",
-    "docker/README.md",
-    "docker",
-    "backend",
     "observability/README.md",
     "observability",
-    "vision"
+    "frontend/README.md",
+    "frontend",
+    "docker/README.md",
+    "docker",
+    "database/README.md",
+    "database",
+    "backend/README.md",
+    "backend",
+    "Tech-Glossary.md",
+    "MOC.md",
+    "architecture/Progress.md",
+    "architecture/templates/ADR-017-Embedding-Model-Strategy.md"
   ]
 }

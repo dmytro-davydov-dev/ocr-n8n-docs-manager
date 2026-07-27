@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated:_ 2026-07-26 (Bugfix: documents wedged in `processing` forever — no Celery time limits + unhandled `MaxRetriesExceededError`; see below.)
+_Last updated:_ 2026-07-27 (Bugfix: `celery-worker` OOM-crash-looping on paddleocr's runtime JIT compile, not a fixable memory-limit-size problem — moved the compile to Docker build time; see below.)
 
 ## Overall Status
 
@@ -729,6 +729,42 @@ _Last updated:_ 2026-07-26 (Bugfix: documents wedged in `processing` forever —
   gets redelivered (celery-worker logs should show the same task id picked
   up again rather than the document just sitting there), and confirm
   whether raising `WORKER_MEMORY_LIMIT` actually lets `run_ocr` complete.
+
+- Bugfix follow-up #2: raising `WORKER_MEMORY_LIMIT` (previous entry) did not
+  fix the OOM crash -- it moved the wall, not the problem. Diagnosed live
+  with the user watching `docker stats` during a reprocess: `celery-worker`'s
+  RSS climbed from ~330MB to the *exact* configured limit (reproduced at
+  both 4G and 6G) within ~20-40s and got SIGKILLed every time, logging
+  `No ccache found. Please be aware that recompiling all source files may
+  be required` from `paddle/utils/cpp_extension` right before each kill.
+  Root cause: PaddlePaddle JIT-compiles a native C++ extension the first
+  time `PaddleOCR()` is instantiated, specific to the exact CPU/arch it's
+  running on (no prebuilt wheel covers every target) -- that compile itself,
+  not steady-state OCR inference on a 300KB PDF, is what was unbounded and
+  OOMing. Confirmed this was an unrecoverable loop, not a one-time
+  cold-start cost: the `task_acks_late`/`task_reject_on_worker_lost` fix
+  (previous entry) was correctly redelivering the same `run_ocr` task after
+  every crash, but each redelivery landed on a *new* Celery pool worker
+  forked from the pre-fork parent (which never ran this compile), so every
+  single attempt redid the full compile from scratch and re-OOMed --
+  compile -> OOM -> new worker -> compile -> OOM, forever, regardless of how
+  high `WORKER_MEMORY_LIMIT` was raised.
+  Fixed by moving the compile out of the runtime crash loop entirely: added
+  `ccache` to the `apt-get install` list and a
+  `RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(...)"`
+  pre-warm step to `apps/backend/Dockerfile`, right after `pip install`
+  (before `COPY . .`, so it's cached across app-code-only rebuilds and only
+  reruns when `requirements.txt` changes). This runs once at `docker build`
+  time, when it isn't competing with `celery-worker`'s runtime memory limit
+  or any other running container for the VM's memory, and bakes the
+  compiled extension into the image layer -- no container built from it has
+  to compile live again.
+  **Not verified end-to-end** (no docker in this session) -- next step for
+  whoever has the stack is `docker compose build celery-worker` (expect it
+  to take noticeably longer this time while the compile runs during build)
+  followed by `docker compose up -d celery-worker` and a Reprocess click;
+  watch `docker stats` for a steady-state (non-climbing-to-the-limit) memory
+  profile during OCR, confirming the compile no longer happens live.
 
 ## In Progress
 

@@ -47,10 +47,20 @@ class Settings(BaseSettings):
 
     # WS-03: OCR engine is swappable via config only (ADR-010, WS-03 Done Criteria).
     # "paddleocr" is the ADR-010 default; "null" is a no-op engine for environments
-    # without the (heavy) paddleocr/paddlepaddle dependencies installed.
+    # without the (heavy) paddleocr/paddlepaddle dependencies installed;
+    # "tesseract" is the ADR-010 addendum engine, added after paddleocr/
+    # paddlepaddle turned out to have a confirmed, upstream, unfixed native
+    # memory leak on CPU inference (see docs/architecture/ADR-010-OCR-Engine-Selection.md).
     ocr_engine: str = Field(default="paddleocr", alias="OCR_ENGINE")
     ocr_rasterize_dpi: int = Field(default=200, alias="OCR_RASTERIZE_DPI")
     ocr_max_retries: int = Field(default=3, alias="OCR_MAX_RETRIES")
+    # Tesseract uses ISO 639-2 (3-letter) language codes, e.g. "eng", "por" --
+    # a different convention than PaddleOCR's 2-letter codes, so this is its
+    # own setting rather than shared. Not currently wired to actual document
+    # language detection; "eng" matches PaddleOcrEngine's own hardcoded "en"
+    # default for consistency. Override per-deployment (e.g. OCR_TESSERACT_LANG=por
+    # for Portuguese-language contracts) until real language detection exists.
+    ocr_tesseract_lang: str = Field(default="eng", alias="OCR_TESSERACT_LANG")
 
     # ADR-008 named "tasks remain stuck" as a risk to mitigate with time
     # limits; none were previously configured, so a hang inside a task (e.g.

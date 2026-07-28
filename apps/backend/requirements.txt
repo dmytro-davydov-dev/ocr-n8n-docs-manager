@@ -24,3 +24,19 @@ paddleocr==2.9.1
 # container). 3.2.2 imports cleanly on the same architecture -- verified
 # the same way, not assumed.
 paddlepaddle==3.2.2
+# ADR-010 addendum: paddleocr/paddlepaddle has a confirmed, upstream, unfixed
+# native memory leak on CPU inference across sequential calls in one process
+# (see docs/architecture/ADR-010-OCR-Engine-Selection.md and
+# docs/architecture/Progress.md) -- OOM-crash-loops celery-worker on any real
+# multi-page document. pytesseract (+ the tesseract-ocr system binary,
+# installed in the Dockerfile) is the replacement engine
+# (app/services/ocr_engine.py:TesseractOcrEngine). Kept paddleocr/paddlepaddle
+# installed rather than removed, since OCR_ENGINE=paddleocr is still a valid
+# (if fragile) configuration and removing them would break it outright.
+pytesseract==0.3.13
+# Already an indirect dependency via paddleocr, but both OCR engines import
+# it directly now -- declared explicitly rather than relying on it surviving
+# transitively if paddleocr/paddlepaddle are ever dropped. Left unpinned:
+# paddleocr/paddlepaddle already constrain it transitively, and pinning an
+# exact version here risks fighting that resolution rather than helping it.
+pillow

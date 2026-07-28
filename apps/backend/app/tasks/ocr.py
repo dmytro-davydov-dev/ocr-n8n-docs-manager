@@ -3,6 +3,7 @@ and runs the configured OcrEngine (ADR-010) over it, persisting page-level
 results (ADR-011) via the service layer as they complete.
 """
 
+import gc
 import logging
 
 from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
@@ -150,6 +151,23 @@ def run_ocr(self, document_id: str, engine: OcrEngine | None = None) -> str:
                     engine_version=active_engine.engine_version,
                     actor="celery:run_ocr",
                 )
+
+                # Diagnosed live: celery-worker's RSS climbed page-over-page
+                # within a single run_ocr call (not a single-page spike) and
+                # eventually got OOM-killed on a 6-page real document, while
+                # an otherwise-identical 2-page fixture completed fine --
+                # same paddleocr/paddlepaddle version, same page dimensions,
+                # so page *count* within one long-lived engine instance is
+                # the variable, not a corrupt/oversized page (see
+                # docs/architecture/Progress.md). PaddlePaddle's CPU
+                # allocator doesn't necessarily return memory to the OS
+                # between inference calls on its own; dropping references to
+                # each page's large buffers and forcing a collection before
+                # moving to the next page is a targeted attempt to cap that
+                # growth instead of letting it accumulate for the whole
+                # document.
+                del pixmap, image_bytes, result
+                gc.collect()
         finally:
             pdf.close()
 

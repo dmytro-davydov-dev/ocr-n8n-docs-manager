@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated:_ 2026-07-26 (Bugfix: documents wedged in `processing` forever — no Celery time limits + unhandled `MaxRetriesExceededError`; see below.)
+_Last updated:_ 2026-07-28 (Full saga: documents wedged in `processing` forever, traced through four stacked causes down to a confirmed upstream PaddleOCR/PaddlePaddle native memory leak; added Tesseract as a working alternative engine. See below and ADR-010's addendum.)
 
 ## Overall Status
 
@@ -729,6 +729,97 @@ _Last updated:_ 2026-07-26 (Bugfix: documents wedged in `processing` forever —
   gets redelivered (celery-worker logs should show the same task id picked
   up again rather than the document just sitting there), and confirm
   whether raising `WORKER_MEMORY_LIMIT` actually lets `run_ocr` complete.
+
+- Bugfix follow-up #3: isolated the OOM to page *count* within a single
+  `run_ocr` call, not a corrupt/oversized page or the JIT-compile loop
+  (previous two entries). Two live checks with the user, no code changes
+  needed to run them: (1) reprocessing `fixtures/ocr_extraction/
+  sample_contract.pdf` (2 pages) completed fine under the exact same image;
+  the real signed contract (6 pages) still got stuck in `processing` every
+  time. (2) a PyMuPDF one-liner run inside the container confirmed the
+  signed contract's pages are unremarkable -- standard A4 (595x842pt),
+  ~11.6MB raw RGB per rendered page at the configured 200 DPI, nothing
+  pathological. Since `requirements.txt`/`app/services/ocr_engine.py` are
+  byte-for-byte identical to commit `9384742` ("verify real OCR works" --
+  checked via `git diff`, see the "18 commits back" discussion below), the
+  only variable left is that `run_ocr` calls `active_engine.recognize_page()`
+  in a loop across all of a document's pages, reusing one long-lived
+  `PaddleOCR` instance, with nothing releasing memory between iterations --
+  consistent with the steady climb (not a sudden spike) `docker stats`
+  showed earlier: 2 pages stays under the limit, 6 doesn't.
+  Added an explicit `del pixmap, image_bytes, result` + `gc.collect()` at
+  the end of each page iteration in `app/tasks/ocr.py`'s loop, targeting
+  the hypothesis that PaddlePaddle's CPU allocator isn't returning memory to
+  the OS between inference calls within the same process. Full 72-test
+  backend suite still passes. **Not yet verified against the real signed
+  contract** -- next step is rebuild `celery-worker`, reprocess it again,
+  and watch `docker stats` for a flat/bounded profile across all 6 pages
+  instead of a climb. If it still OOMs, the leak is likely inside
+  paddlepaddle's own C++ runtime (below what `gc.collect()` can reach) and
+  the more reliable fix would be running each page's OCR call in a fresh
+  subprocess rather than in-process, or switching this environment to
+  `OCR_ENGINE=null`/a lighter engine.
+- Aside: considered checking out `HEAD~18` to compare against a "previously
+  working" state per the user's request, but the commit log shows `HEAD~18`
+  (`0d4c5d4`) predates both of this project's paddleocr-on-ARM64 fixes
+  (`b2057c5` missing-setuptools fix, 12 commits back; `9384742` segfault fix
+  + "verify real OCR works", 4 commits back) -- going back that far would
+  almost certainly land somewhere paddleocr doesn't even import, not a
+  meaningful comparison point. Declined the checkout in favor of the two
+  live checks above, which don't require a rebuild-per-attempt bisection
+  cycle and (per `git diff 9384742 HEAD`) would have compared identical OCR
+  code anyway.
+
+- Bugfix follow-up #4 (resolution): confirmed the page-count-dependent OOM
+  (previous entry) is a known, upstream, unfixed PaddleOCR/PaddlePaddle bug
+  via web search -- multiple open GitHub issues describe exactly this
+  pattern (CPU inference RSS climbing across sequential calls within one
+  process, never released), independent of this project's version pins:
+  [#15631](https://github.com/PaddlePaddle/PaddleOCR/issues/15631),
+  [#17955](https://github.com/PaddlePaddle/PaddleOCR/issues/17955),
+  [#16173](https://github.com/PaddlePaddle/PaddleOCR/issues/16173). One
+  thread traces it to an internal runtime program-cache keyed per distinct
+  image rather than anything tied to the Python `PaddleOCR` object's
+  lifetime -- consistent with `gc.collect()` (previous entry) not touching
+  it.
+  Decision (full reasoning in ADR-010's addendum, `docs/architecture/
+  templates/ADR-010-OCR-Engine-Selection.md`): rather than subprocess-
+  isolating each PaddleOCR page call (real fix, but real engineering effort
+  and per-page latency, for a dependency that's now cost this project three
+  separate platform-specific failures -- the ARM64 segfault, the missing-
+  setuptools import failure, and this leak), added **Tesseract** as a
+  second, fully-supported engine and switched this environment to it.
+  Added `TesseractOcrEngine` (`app/services/ocr_engine.py`, wired into the
+  existing `_ENGINES`/`get_ocr_engine()` config-driven selection alongside
+  `PaddleOcrEngine`/`NullOcrEngine` -- ADR-010's "swappable via
+  configuration, not code changes" requirement doing its job), a new
+  `OCR_TESSERACT_LANG` setting (default `eng`; tesseract uses 3-letter ISO
+  639-2 codes, a different convention than PaddleOCR's 2-letter codes, so
+  it's its own setting), `pytesseract` + unpinned `pillow` in
+  `requirements.txt`, and `tesseract-ocr`/`tesseract-ocr-eng`/
+  `tesseract-ocr-por` in the Dockerfile (this project's real test documents
+  are Portuguese-language contracts). Set `OCR_ENGINE=null` in `.env`
+  immediately as an unblock (extraction/embeddings/review work without
+  waiting on OCR), pending the user rebuilding and switching to
+  `OCR_ENGINE=tesseract` once verified in their environment.
+  Verified for real, not just reasoned about -- `tesseract` happened to
+  already be installed in this session's own dev shell, so
+  `TesseractOcrEngine` was exercised directly: correctly recognized real
+  rendered text, reported a real engine version (4.1.1), and **30 repeated
+  `recognize_page` calls against the same image showed zero RSS growth**
+  (flat at ~87MB), unlike PaddleOCR's multi-GB climb on a real 6-page
+  document. Added `apps/backend/tests/test_ocr_engine.py` (8 new tests:
+  real recognition + line-structure + the repeated-calls-don't-grow-memory
+  regression test + `OcrEngineUnavailable` on missing
+  pytesseract/tesseract-binary + `get_ocr_engine()` wiring/language
+  selection). Full suite: 80 passing.
+  **Not yet verified inside the actual `celery-worker` Docker image** (no
+  docker in this session) -- next step for the user is rebuilding with
+  `docker compose up --build -d celery-worker` (picks up the new
+  `tesseract-ocr` apt packages), setting `OCR_ENGINE=tesseract` in `.env`,
+  and reprocessing the real signed contract to confirm both real OCR output
+  and flat memory in `docker stats`, same as this session's local
+  verification.
 
 ## In Progress
 

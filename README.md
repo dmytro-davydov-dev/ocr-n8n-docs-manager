@@ -142,9 +142,10 @@ Copy `.env.example` to `.env` and adjust values as needed.
 | N8N_SECURE_COOKIE | n8n secure cookie mode | false |
 | GENERIC_TIMEZONE | n8n timezone | UTC |
 | N8N_ENCRYPTION_KEY | n8n credential encryption key | replace-this-key |
-| OCR_ENGINE | OCR engine implementation (ADR-010): `paddleocr` or `null` | paddleocr |
+| OCR_ENGINE | OCR engine implementation (ADR-010, addendum): `paddleocr`, `tesseract`, or `null` | paddleocr |
 | OCR_RASTERIZE_DPI | Page rasterization DPI before OCR | 200 |
 | OCR_MAX_RETRIES | Celery retry attempts for transient OCR failures | 3 |
+| OCR_TESSERACT_LANG | Tesseract language (ISO 639-2, e.g. `eng`/`por`); only used when `OCR_ENGINE=tesseract` | eng |
 | LLM_PROVIDER | LLM client implementation (ADR-012) | openai_compatible |
 | LLM_BASE_URL | OpenAI-compatible LLM endpoint (OpenAI, Azure OpenAI, Ollama, vLLM); extraction fails fast if unset | (unset) |
 | LLM_API_KEY | LLM provider API key | (unset) |
@@ -167,6 +168,7 @@ Copy `.env.example` to `.env` and adjust values as needed.
 | WORKER_MEMORY_LIMIT | celery-worker memory limit | 4G |
 | WORKER_CPU_RESERVATION | celery-worker CPU reservation | 0.5 |
 | WORKER_MEMORY_RESERVATION | celery-worker memory reservation | 1G |
+| WORKER_CONCURRENCY | celery-worker `--concurrency` (ADR-008/WS-03's "controlled concurrency"); prefork otherwise defaults to host CPU count, not the limit above | 2 |
 
 The `postgres` service runs the `pgvector/pgvector:pg16` image with the `vector` extension enabled on the application database (ADR-016), ready for WS-02/WS-03 to migrate `chunks.embedding` to a native `vector` column. The `n8n` service uses its own Postgres role (`N8N_DB_USER`/`N8N_DB_PASSWORD`), isolated from the application's credentials — both are provisioned by `infra/postgres-init.sh` on first boot of an empty `postgres_data` volume.
 

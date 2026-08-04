@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated:_ 2026-07-28 (Full saga: documents wedged in `processing` forever, traced through four stacked causes down to a confirmed upstream PaddleOCR/PaddlePaddle native memory leak; added Tesseract as a working alternative engine. See below and ADR-010's addendum.)
+_Last updated:_ 2026-07-28 (Full saga: documents wedged in `processing` forever, traced through four stacked causes down to a confirmed upstream PaddleOCR/PaddlePaddle native memory leak; added Tesseract as a working alternative engine, then closed the separate "uncontrolled worker concurrency" gap ADR-008/WS-03 had named but never implemented. See below and ADR-010's addendum.)
 
 ## Overall Status
 
@@ -820,6 +820,51 @@ _Last updated:_ 2026-07-28 (Full saga: documents wedged in `processing` forever,
   and reprocessing the real signed contract to confirm both real OCR output
   and flat memory in `docker stats`, same as this session's local
   verification.
+
+- Bugfix follow-up #5: closed a second, independent gap surfaced while
+  reviewing the Tesseract fix above with the user -- ADR-008/WS-03 named
+  "controlled concurrency" as the mitigation for "OCR tasks exhaust CPU or
+  memory" from the start, but it was never actually configured, same as the
+  `task_acks_late` gap earlier in this saga. `docker-compose.yml`'s
+  `celery-worker` command had no `--concurrency` flag, so Celery's prefork
+  pool defaulted to `os.cpu_count()` on the *host*, not the container's
+  `WORKER_CPU_LIMIT`/`WORKER_MEMORY_LIMIT`. The user's own `docker compose
+  logs celery-worker` output (attached live) showed several
+  `ForkPoolWorker`s SIGKILLed within seconds of each other across unrelated
+  job ids, right as three different documents' `run_ocr` tasks were received
+  back to back -- consistent with concurrent, uncapped workers collectively
+  oversubscribing the container's memory limit, distinct from bugfix
+  follow-up #3/#4's single-task RSS growth (this can happen regardless of
+  which `OCR_ENGINE` is active, including the new leak-free `tesseract`
+  path, since PyMuPDF rasterization and Tesseract's own per-call footprint
+  still cost real memory per concurrent worker).
+  Added an explicit `--concurrency=${WORKER_CONCURRENCY:-2}` to the
+  `celery-worker` command (`docker-compose.yml`), defaulting to
+  `WORKER_CPU_LIMIT`'s existing default so worker count and CPU allotment
+  move together unless deliberately split; documented in `.env`/`.env.example`/
+  `README.md`. Also wired `OCR_TESSERACT_LANG` (added alongside
+  `TesseractOcrEngine` in the previous entry, but never actually passed
+  through `docker-compose.yml`) into both the `backend` and `celery-worker`
+  environment blocks, and set it to `por` in this project's own `.env` --
+  without this, this project's real Portuguese-language contracts would have
+  silently OCR'd against Tesseract's English language data despite
+  `tesseract-ocr-por` being installed in the Dockerfile specifically for
+  them. Added `worker_max_tasks_per_child=50` to `celery_app.py` as
+  defense-in-depth: not load-bearing for the default `tesseract` path (its
+  RSS was already shown flat over repeated calls, follow-up #4), but keeps
+  `OCR_ENGINE=paddleocr` -- still a supported, if fragile, configuration --
+  from accumulating its confirmed native-runtime leak indefinitely in a
+  single long-lived worker process.
+  Full 80-test backend suite still passes (`PYTHONPATH=. pytest`, this
+  session's own shell -- no Docker available here either).
+  `docker-compose.yml` re-validated by parsing it with `pyyaml` and
+  confirming the rendered `celery-worker` command and both services'
+  `OCR_TESSERACT_LANG` substitutions. **Not yet verified against a live
+  `docker compose up`** -- next step for the user is rebuilding
+  `celery-worker`, queuing several documents concurrently, and confirming in
+  `docker stats` that RSS stays bounded and no `ForkPoolWorker` gets
+  SIGKILLed, on top of the still-outstanding tesseract verification from the
+  previous entry.
 
 ## In Progress
 

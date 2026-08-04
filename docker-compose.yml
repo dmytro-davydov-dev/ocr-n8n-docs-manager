@@ -36,6 +36,7 @@ services:
       OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
       OCR_RASTERIZE_DPI: ${OCR_RASTERIZE_DPI:-200}
       OCR_MAX_RETRIES: ${OCR_MAX_RETRIES:-3}
+      OCR_TESSERACT_LANG: ${OCR_TESSERACT_LANG:-eng}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
@@ -72,7 +73,24 @@ services:
     build:
       context: apps/backend
       dockerfile: Dockerfile
-    command: celery -A app.celery_app:celery_app worker --loglevel=info
+    # ADR-008/WS-03 named "controlled concurrency" as the mitigation for "OCR
+    # tasks exhaust CPU or memory" but never actually configured it -- the
+    # prefork pool's default concurrency is os.cpu_count() on the *host*,
+    # not the `cpus` limit set below, so this container could fork far more
+    # OCR-capable workers than WORKER_MEMORY_LIMIT can hold. Confirmed live:
+    # celery-worker logs showed several ForkPoolWorkers SIGKILLed within
+    # seconds of each other across unrelated job ids while three documents'
+    # run_ocr tasks were received back to back -- consistent with concurrent
+    # workers collectively oversubscribing the container's memory limit,
+    # not any single task's own footprint. Explicit --concurrency, matching
+    # WORKER_CPU_LIMIT by default, bounds the worker count so "N workers x
+    # per-worker footprint" is something WORKER_MEMORY_LIMIT can actually be
+    # sized against -- independent of which OCR_ENGINE is configured (the
+    # tesseract engine below removes a *leak inside one task*; this bounds
+    # *how many tasks run at once*, see docs/architecture/Progress.md).
+    command: >
+      celery -A app.celery_app:celery_app worker --loglevel=info
+      --concurrency=${WORKER_CONCURRENCY:-2}
     environment:
       APP_ENV: ${APP_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -84,6 +102,7 @@ services:
       OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
       OCR_RASTERIZE_DPI: ${OCR_RASTERIZE_DPI:-200}
       OCR_MAX_RETRIES: ${OCR_MAX_RETRIES:-3}
+      OCR_TESSERACT_LANG: ${OCR_TESSERACT_LANG:-eng}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}

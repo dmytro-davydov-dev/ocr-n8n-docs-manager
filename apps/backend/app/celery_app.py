@@ -26,10 +26,26 @@ celery_app = Celery(
 # document's current status before acting -- ADR-008/009). prefetch=1 is the
 # standard pairing so one worker doesn't hoard several long-running unacked
 # OCR tasks while others sit idle.
+
+# worker_max_tasks_per_child: recycles a pool worker after N tasks instead of
+# reusing it forever. Not load-bearing for the default OCR_ENGINE=tesseract
+# path -- TesseractOcrEngine showed zero RSS growth over repeated calls
+# (apps/backend/tests/test_ocr_engine.py), so there's no per-process leak
+# left to recycle away there. It stays load-bearing for OCR_ENGINE=paddleocr,
+# which remains a supported (if fragile, per ADR-010's addendum) config: its
+# confirmed upstream native-allocator leak lives inside PaddlePaddle's C++
+# runtime, below what gc.collect() (app/tasks/ocr.py) can reach, so a
+# paddleocr-backed worker still accumulates RSS across tasks even after that
+# mitigation. Recycling every 50 tasks bounds that accumulation to "50 tasks'
+# worth of growth" instead of "until WORKER_MEMORY_LIMIT kills it", without
+# meaningfully hurting steady-state throughput (PaddleOCR's own model-load
+# cost, paid once per process, amortizes over 50 tasks; tesseract's is
+# negligible either way). See docs/architecture/Progress.md.
 celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
+    worker_max_tasks_per_child=50,
 )
 
 
